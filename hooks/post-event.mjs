@@ -3,8 +3,10 @@
 // Regras: sem chave = sai em silêncio; timeout de 1,5 s; sai 0 SEMPRE (nunca bloqueia a sessão).
 //
 // O que sai da máquina é o MÍNIMO que o feed usa: nome da ferramenta, caminho do arquivo (nunca o
-// conteúdo), começo do comando, busca, URL, nome do agente. Chaves, tokens e senhas que aparecerem
-// nesses campos são apagados antes do envio. Read/Grep/Glob não saem (ruído).
+// conteúdo), começo do comando e a descrição dele, busca, domínio visitado, nome e descrição do
+// agente, pasta de trabalho. A RESPOSTA das ferramentas nunca sai (nenhuma tela usa). Padrões
+// conhecidos de chave, token e senha nesses campos são apagados antes do envio. Read/Grep/Glob
+// não saem (ruído).
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -47,6 +49,12 @@ const SECRET_PATTERNS = [
   /\bsk-[A-Za-z0-9_-]{20,}/g, // OpenAI / Anthropic
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/g, // JWT
   /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi,
+  /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key id
+  /\b(?:aws_secret_access_key|aws_session_token)\b\s*[=:\s]\s*\S+/gi, // AWS secret (aws configure set …)
+  /["']?\b[\w-]*(?:key|token|secret|password|passwd|pwd|pass)[\w-]*\b["']?\s*:\s*["'][^"']*["']/gi, // "campo": "valor" (JSON/YAML)
+  /--?(?:password|passwd|pass|token|secret|api-?key|auth|access-token)(?:[=\s]+)\S+/gi, // --password X, --token=X
+  /(\s-p)(?!\s)\S+/g, // mysql -pSENHA (grudado; `mkdir -p x` não casa)
+  /(\s-u\s+)[^\s:]+:\S+/g, // curl -u usuario:senha
   /\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASS|PWD)[A-Z0-9_]*)\s*[=:]\s*\S+/gi,
   /:\/\/[^\s/:@]+:[^\s/@]+@/g, // usuário:senha em URL
 ];
@@ -54,9 +62,12 @@ const SECRET_PATTERNS = [
 function redact(s) {
   let out = s;
   for (const re of SECRET_PATTERNS) {
-    out = out.replace(re, (m, name) =>
-      typeof name === "string" && /=|:/.test(m) && !/^(Bearer|Basic)$/i.test(name) ? `${name}=[redigido]` : "[redigido]",
-    );
+    out = out.replace(re, (m, g1) => {
+      if (typeof g1 !== "string") return "[redigido]";
+      if (/^\s-[pu]/.test(g1)) return `${g1}[redigido]`; // mantém a flag, apaga o valor
+      if (/^(Bearer|Basic)$/i.test(g1)) return "[redigido]";
+      return /=|:/.test(m) ? `${g1}=[redigido]` : "[redigido]";
+    });
   }
   return out;
 }
@@ -84,8 +95,16 @@ function pickInput(tool, input) {
       return { subagent_type: cut(i.subagent_type, 80), description: cut(i.description, 120) };
     case "WebSearch":
       return { query: cut(i.query, 200) };
-    case "WebFetch":
-      return { url: cut(typeof i.url === "string" ? i.url.split("?")[0] : undefined, 300) };
+    case "WebFetch": {
+      // só o domínio: caminho e query podem carregar token (o feed mostra só o host mesmo)
+      let host;
+      try {
+        host = new URL(String(i.url)).origin;
+      } catch {
+        host = undefined;
+      }
+      return { url: host };
+    }
     default:
       return {};
   }
@@ -115,23 +134,14 @@ async function main() {
   const toolName = hook.tool_name ?? event;
   if (!toolName) return;
 
-  let toolInput;
-  let toolResponse = null;
-  if (isAgentEvent) {
-    toolInput = strip({ agent_type: cut(hook.agent_type, 80), agent_id: cut(hook.agent_id, 80) });
-  } else {
-    toolInput = strip(pickInput(toolName, hook.tool_input));
-    // resposta só onde ajuda o feed, curta e redigida; conteúdo de arquivo nunca sai
-    if (toolName === "Bash" || toolName === "Agent" || toolName === "Task") {
-      const r = typeof hook.tool_response === "string" ? hook.tool_response : JSON.stringify(hook.tool_response ?? "");
-      toolResponse = cut(r, 200) ?? null;
-    }
-  }
+  const toolInput = isAgentEvent
+    ? strip({ agent_type: cut(hook.agent_type, 80), agent_id: cut(hook.agent_id, 80) })
+    : strip(pickInput(toolName, hook.tool_input));
 
   const body = {
     tool_name: toolName,
     tool_input: toolInput,
-    tool_response: toolResponse,
+    tool_response: null, // a resposta das ferramentas nunca sai da máquina
     is_error: false,
     cwd: typeof hook.cwd === "string" ? hook.cwd : process.cwd(),
     session_id: typeof hook.session_id === "string" ? hook.session_id : null,

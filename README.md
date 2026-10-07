@@ -53,11 +53,14 @@ Com a chave do Iron Office salva, **toda sessão** do Claude Code manda pro seu 
 
 - o nome de cada ferramenta usada (menos `Read`, `Grep` e `Glob`);
 - o **caminho** dos arquivos criados ou editados (nunca o conteúdo);
-- os primeiros 200 caracteres de cada comando de terminal e da resposta dele;
-- buscas na web e endereços visitados (sem os parâmetros);
-- o nome dos agentes acionados.
+- os primeiros 200 caracteres de cada comando de terminal e a descrição curta dele;
+- buscas na web e o **domínio** dos endereços visitados (sem caminho nem parâmetros);
+- o nome e a descrição curta dos agentes acionados;
+- a pasta onde a sessão está rodando e o identificador da sessão.
 
-Chaves, tokens e senhas que aparecem nesses campos (padrões de Stripe, Shopify, Meta, GitHub, OpenAI, Supabase, JWT, `Bearer`, `ALGO_KEY=`…) são apagados **antes** de sair.
+A **resposta** das ferramentas (saída de comando, conteúdo lido, resultado de agente) **nunca sai**.
+
+Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair: chaves de Stripe, Shopify, Meta, GitHub, OpenAI/Anthropic, Supabase e AWS, JWT, `Bearer`, `ALGO_KEY=valor`, `"password": "…"`, `--password X`, `--token=X`, `-pSENHA` e `-u usuario:senha`. É uma lista de padrões, não uma garantia: um segredo num formato que ela não conhece passa.
 
 **Pra desligar:** `claude plugin disable iron-office@iron-office-channel` (ou `uninstall`). Apagar `~/.claude/iron-office-api-key` também corta todo envio.
 

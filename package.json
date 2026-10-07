@@ -1,6 +1,6 @@
 {
   "name": "iron-office-channel",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Canal do Claude Code que liga o dashboard do Iron Office (iron-office.vercel.app) à sessão local do aluno.",
   "type": "module",

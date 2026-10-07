@@ -16951,7 +16951,7 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
-var VERSION = "0.2.0";
+var VERSION = "0.2.1";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");
@@ -17056,10 +17056,17 @@ async function acquireLock() {
         return true;
       }
     }
-    let holder = 0;
-    try {
-      holder = parseInt(readFileSync(LOCK_PATH, "utf8").trim(), 10);
-    } catch {
+    const readHolder = () => {
+      try {
+        return parseInt(readFileSync(LOCK_PATH, "utf8").trim(), 10);
+      } catch {
+        return NaN;
+      }
+    };
+    let holder = readHolder();
+    if (Number.isNaN(holder)) {
+      await new Promise((r) => setTimeout(r, 200));
+      holder = readHolder();
     }
     if (holder === process.pid) return true;
     if (await holderAlive(holder)) return false;

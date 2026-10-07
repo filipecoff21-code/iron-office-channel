@@ -224,25 +224,48 @@ async function runHook(home, url, input) {
   console.log("hook");
   const f = await fakeOffice(() => ({ json: {} }));
   const home = casa();
+  const hook = (input) => runHook(home, f.url, input);
+  const bash = (command, tool_response = "") =>
+    hook({ session_id: "s", cwd: "/tmp", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command }, tool_response });
   const big = "STRIPE_SECRET=sk_live_ABC123XYZ\n" + "x".repeat(200_000);
-  await runHook(home, f.url, { session_id: "s", cwd: "/tmp", hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/app/.env", content: big }, tool_response: big });
-  await runHook(home, f.url, { session_id: "s", cwd: "/tmp", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: `echo "${KEY}" > ~/.claude/iron-office-api-key` }, tool_response: "" });
-  await runHook(home, f.url, { session_id: "s", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "export API_TOKEN=abc123 && curl -H 'Authorization: Bearer xyz.789' x" } });
-  await runHook(home, f.url, { session_id: "s", hook_event_name: "SubagentStop", agent_type: "" });
-  await runHook(home, f.url, { session_id: "s", hook_event_name: "SubagentStart", agent_type: "iron-research", agent_id: "a1" });
-  await runHook(home, f.url, { session_id: "s", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "🎉".repeat(300) } });
+
+  await hook({ session_id: "s", cwd: "/tmp", hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/app/.env", content: big }, tool_response: big });
+  await bash(`echo "${KEY}" > ~/.claude/iron-office-api-key`);
+  await bash("export API_TOKEN=abc123 && curl -H 'Authorization: Bearer xyz.789' x");
+  // casos que vazaram na rodada 2 do gate
+  await bash("cat config.json", { stdout: '{"api_key": "abcd1234efgh", "password":"p4ssw0rd", "client_secret": "zzz"}' });
+  await bash("mysql -u root -phunter2 db && psql --password hunter3 && tool --token=tok999");
+  await bash("curl -u admin:s3cretpass https://x");
+  await bash("aws configure set aws_secret_access_key wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY && echo AKIAIOSFODNN7EXAMPLE");
+  await bash(`node -e 'x({"apiKey": "inline777"})'`);
+  await bash("mkdir -p dist && npm run build");
+  await hook({ session_id: "s", hook_event_name: "PostToolUse", tool_name: "WebFetch", tool_input: { url: "https://hooks.exemplo.com/T0/B1/segredoNoCaminho?token=q1" } });
+  await hook({ session_id: "s", hook_event_name: "SubagentStop", agent_type: "" });
+  await hook({ session_id: "s", hook_event_name: "SubagentStart", agent_type: "iron-research", agent_id: "a1" });
+  await bash("🎉".repeat(300));
   const code = await runHook(home, f.url, "");
+  const antesSemChave = f.calls.length;
   await runHook(casa(null), f.url, { tool_name: "Bash", tool_input: { command: "ls" } });
+
   const sent = f.calls.map((c) => JSON.stringify(c.body)).join("\n");
+  const cmd = (needle) => f.calls.find((c) => (c.body?.tool_input?.command ?? "").includes(needle))?.body.tool_input.command;
   check("Write manda só o caminho, nunca o conteúdo", f.calls[0]?.body?.tool_input?.file_path === "/app/.env" && !sent.includes("sk_live") && !sent.includes("xxxxxxxxxx"));
   check("a chave do Iron Office nunca sai", !sent.includes(KEY));
-  check("token e Bearer redigidos", !sent.includes("abc123") && !sent.includes("xyz.789"), f.calls[2] && JSON.stringify(f.calls[2].body.tool_input));
+  check("token e Bearer redigidos", !sent.includes("abc123") && !sent.includes("xyz.789"));
+  check("a resposta das ferramentas nunca sai", f.calls.every((c) => c.body?.tool_response === null) && !sent.includes("abcd1234efgh") && !sent.includes("p4ssw0rd"));
+  check("--password, -pSENHA e --token= redigidos", !/hunter2|hunter3|tok999/.test(sent), cmd("mysql"));
+  check("curl -u usuario:senha redigido", !sent.includes("s3cretpass"), cmd("curl -u"));
+  check("chaves da AWS redigidas", !sent.includes("wJalrXUtnFEMI") && !sent.includes("AKIAIOSFODNN7EXAMPLE"), cmd("aws"));
+  check('"campo": "valor" com aspas redigido', !sent.includes("inline777"), cmd("node -e"));
+  check("comando sem segredo passa inteiro (mkdir -p)", cmd("mkdir") === "mkdir -p dist && npm run build", cmd("mkdir"));
+  const fetch = f.calls.find((c) => c.body?.tool_name === "WebFetch");
+  check("WebFetch manda só o domínio", fetch?.body?.tool_input?.url === "https://hooks.exemplo.com" && !sent.includes("segredoNoCaminho"), JSON.stringify(fetch?.body?.tool_input));
   check("SubagentStop sem agente não vira evento", !f.calls.some((c) => c.body?.tool_name === "SubagentStop"));
   check("SubagentStart leva o nome do agente", f.calls.some((c) => c.body?.tool_input?.agent_type === "iron-research"));
   const emoji = f.calls.find((c) => (c.body?.tool_input?.command ?? "").startsWith("🎉"));
   check("corte não parte emoji ao meio", !!emoji && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(emoji.body.tool_input.command));
   check("stdin vazio sai 0", code === 0);
-  check("sem chave não envia nada (5 = os 5 envios válidos acima)", f.calls.length === 5, `chamadas: ${f.calls.length}`);
+  check("sem chave não envia nada", f.calls.length === antesSemChave);
   f.srv.close();
 }
 

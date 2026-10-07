@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -144,11 +144,18 @@ async function acquireLock() {
         return true;
       }
     }
-    let holder = 0;
-    try {
-      holder = parseInt(readFileSync(LOCK_PATH, "utf8").trim(), 10);
-    } catch {
-      // lido vazio ou sumiu no meio: tenta de novo
+    const readHolder = () => {
+      try {
+        return parseInt(readFileSync(LOCK_PATH, "utf8").trim(), 10);
+      } catch {
+        return NaN;
+      }
+    };
+    let holder = readHolder();
+    if (Number.isNaN(holder)) {
+      // o `wx` cria o arquivo vazio e só depois grava o pid: espera e relê antes de chamar de órfão
+      await new Promise((r) => setTimeout(r, 200));
+      holder = readHolder();
     }
     if (holder === process.pid) return true;
     if (await holderAlive(holder)) return false;
