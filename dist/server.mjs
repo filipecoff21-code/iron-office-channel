@@ -1207,11 +1207,11 @@ var require_util = __commonJS({
       return jsPropertySyntax ? (0, codegen_1.getProperty)(dataProp).toString() : "/" + escapeJsonPointer(dataProp);
     }
     exports.getErrorPath = getErrorPath;
-    function checkStrictMode(it, msg, mode = it.opts.strictSchema) {
-      if (!mode)
+    function checkStrictMode(it, msg, mode2 = it.opts.strictSchema) {
+      if (!mode2)
         return;
       msg = `strict mode: ${msg}`;
-      if (mode === true)
+      if (mode2 === true)
         throw new Error(msg);
       it.self.logger.warn(msg);
     }
@@ -7179,8 +7179,8 @@ var require_dist = __commonJS({
         (0, limit_1.default)(ajv);
       return ajv;
     };
-    formatsPlugin.get = (name, mode = "full") => {
-      const formats = mode === "fast" ? formats_1.fastFormats : formats_1.fullFormats;
+    formatsPlugin.get = (name, mode2 = "full") => {
+      const formats = mode2 === "fast" ? formats_1.fastFormats : formats_1.fullFormats;
       const f = formats[name];
       if (!f)
         throw new Error(`Unknown format "${name}"`);
@@ -8076,7 +8076,7 @@ function $constructor(name, initializer3, proto, params) {
   }
   Internals.prototype = zodProto;
   const protoMembers = proto;
-  const initialized = protoMembers && /* @__PURE__ */ new WeakSet();
+  const initialized2 = protoMembers && /* @__PURE__ */ new WeakSet();
   function init(inst, def) {
     if (!inst._zod) {
       _zodDesc.value = new Internals(def);
@@ -8090,15 +8090,15 @@ function $constructor(name, initializer3, proto, params) {
     }
     inst._zod.traits.add(name);
     initializer3(inst, def);
-    if (initialized) {
+    if (initialized2) {
       const own2 = Object.getPrototypeOf(inst);
       const ctorProto = inst._zod.constr.prototype;
       let up = own2;
       while (up && up !== ctorProto)
         up = Object.getPrototypeOf(up);
       const target = up ?? own2;
-      if (!initialized.has(target)) {
-        initialized.add(target);
+      if (!initialized2.has(target)) {
+        initialized2.add(target);
         members(target, protoMembers);
       }
     }
@@ -16362,8 +16362,8 @@ var ExperimentalServerTasks = class {
    */
   elicitInputStream(params, options) {
     const clientCapabilities = this._server.getClientCapabilities();
-    const mode = params.mode ?? "form";
-    switch (mode) {
+    const mode2 = params.mode ?? "form";
+    switch (mode2) {
       case "url": {
         if (!clientCapabilities?.elicitation?.url) {
           throw new Error("Client does not support url elicitation.");
@@ -16377,7 +16377,7 @@ var ExperimentalServerTasks = class {
         break;
       }
     }
-    const normalizedParams = mode === "form" && params.mode === void 0 ? { ...params, mode: "form" } : params;
+    const normalizedParams = mode2 === "form" && params.mode === void 0 ? { ...params, mode: "form" } : params;
     return this.requestStream({
       method: "elicitation/create",
       params: normalizedParams
@@ -16751,8 +16751,8 @@ var Server = class extends Protocol {
    * @returns The result of the elicitation request.
    */
   async elicitInput(params, options) {
-    const mode = params.mode ?? "form";
-    switch (mode) {
+    const mode2 = params.mode ?? "form";
+    switch (mode2) {
       case "url": {
         if (!this._clientCapabilities?.elicitation?.url) {
           throw new Error("Client does not support url elicitation.");
@@ -16947,111 +16947,153 @@ var StdioServerTransport = class {
 };
 
 // src/server.mjs
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
-var VERSION = "0.1.1";
+var VERSION = "0.2.0";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");
 var LOCK_PATH = join(LOCK_DIR, "office.lock");
+var DEFAULT_CONVERSATION = "00000000-0000-0000-0000-000000000001";
 var FAST_MS = 2e3;
 var SLOW_MS = 15e3;
 var MAX_BACKOFF_MS = 6e4;
 var AUTH_PAUSE_MS = 5 * 6e4;
 var PRESENCE_MS = 3e4;
+var RETAKE_MS = 15e3;
 function log(msg) {
   process.stderr.write(`[iron-office] ${msg}
 `);
 }
 function readKey() {
   try {
-    return readFileSync(KEY_PATH, "utf8").trim();
+    const buf = readFileSync(KEY_PATH);
+    const utf16 = buf.length >= 2 && buf[0] === 255 && buf[1] === 254;
+    return buf.toString(utf16 ? "utf16le" : "utf8").replace(/[﻿\u0000]/g, "").trim();
   } catch {
     return "";
   }
 }
 var API_KEY = readKey();
 var DEGRADED = !API_KEY;
-var CHANNEL_ID = "iron-office@iron-office-channel";
-function processInfo(pid) {
-  try {
-    if (process.platform === "win32") {
-      const r2 = spawnSync(
-        "powershell",
-        ["-NoProfile", "-Command", `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; "$($p.ParentProcessId)|$($p.CommandLine)"`],
-        { encoding: "utf8", timeout: 5e3, windowsHide: true }
-      );
-      const out = (r2.stdout || "").trim();
-      const i = out.indexOf("|");
-      if (r2.status !== 0 || i < 0) return null;
-      return { ppid: parseInt(out.slice(0, i), 10), cmd: out.slice(i + 1) };
-    }
-    const r = spawnSync("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8", timeout: 5e3 });
-    const m = (r.stdout || "").trim().match(/^(\d+)\s+(.*)$/s);
-    if (r.status !== 0 || !m) return null;
-    return { ppid: parseInt(m[1], 10), cmd: m[2] };
-  } catch {
-    return null;
-  }
+function run(cmd, args) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { encoding: "utf8", timeout: 5e3, windowsHide: true }, (err, stdout) => {
+      resolve(err ? null : String(stdout || ""));
+    });
+  });
 }
-function detectChannelMode() {
+async function processInfo(pid) {
+  if (process.platform === "win32") {
+    const out2 = await run("powershell", [
+      "-NoProfile",
+      "-Command",
+      `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; "$($p.ParentProcessId)|$($p.CommandLine)"`
+    ]);
+    const s = (out2 || "").trim();
+    const i = s.indexOf("|");
+    if (i < 0) return null;
+    return { ppid: parseInt(s.slice(0, i), 10), cmd: s.slice(i + 1) };
+  }
+  const out = await run("ps", ["-o", "ppid=,command=", "-p", String(pid)]);
+  const m = (out || "").trim().match(/^(\d+)\s+(.*)$/s);
+  if (!m) return null;
+  return { ppid: parseInt(m[1], 10), cmd: m[2] };
+}
+var CHANNEL_ID = "iron-office@iron-office-channel";
+var CHANNEL_FLAGS = /* @__PURE__ */ new Set(["--dangerously-load-development-channels", "--channels"]);
+function isChannelCommand(cmd) {
+  const tokens = cmd.split(/\s+/).filter(Boolean);
+  const exe = (tokens[0] || "").split(/[\\/]/).pop().toLowerCase();
+  if (!/^(claude|node)(\.exe|\.cmd)?$/.test(exe)) return false;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const [flag, inline] = t.split("=", 2);
+    if (!CHANNEL_FLAGS.has(flag)) continue;
+    const value = inline ?? tokens[i + 1] ?? "";
+    if (value.split(",").some((v) => v.endsWith(CHANNEL_ID))) return true;
+  }
+  return false;
+}
+async function detectChannelMode() {
   if (process.env.IRON_OFFICE_CHANNEL === "1") return true;
   let pid = process.ppid;
-  let readAny = false;
   for (let depth = 0; depth < 4 && pid > 1; depth++) {
-    const info = processInfo(pid);
-    if (!info) break;
-    readAny = true;
-    if (info.cmd.includes(CHANNEL_ID)) return true;
+    const info = await processInfo(pid);
+    if (!info) return false;
+    if (isChannelCommand(info.cmd)) return true;
     pid = info.ppid;
   }
-  return !readAny;
+  return false;
 }
-var CHANNEL_MODE = !DEGRADED && detectChannelMode();
 function pidAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;
   } catch (e) {
-    return e && e.code === "EPERM";
+    return !!e && e.code === "EPERM";
   }
 }
-function acquireLock() {
+async function holderAlive(pid) {
+  if (!pid || pid === process.pid || !pidAlive(pid)) return false;
+  const info = await processInfo(pid);
+  return info ? info.cmd.includes("iron-office") : true;
+}
+async function acquireLock() {
   try {
     mkdirSync(LOCK_DIR, { recursive: true });
-    if (existsSync(LOCK_PATH)) {
-      const other = parseInt(readFileSync(LOCK_PATH, "utf8").trim(), 10);
-      if (other && other !== process.pid && pidAlive(other)) return false;
-    }
-    writeFileSync(LOCK_PATH, String(process.pid));
-    return true;
-  } catch (e) {
-    log(`lock falhou: ${e.message}; seguindo como ativo`);
-    return true;
+  } catch {
   }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(LOCK_PATH, String(process.pid), { flag: "wx" });
+      return true;
+    } catch (e) {
+      if (!e || e.code !== "EEXIST") {
+        log(`lock indispon\xEDvel (${e?.message}); seguindo sem lock`);
+        return true;
+      }
+    }
+    let holder = 0;
+    try {
+      holder = parseInt(readFileSync(LOCK_PATH, "utf8").trim(), 10);
+    } catch {
+    }
+    if (holder === process.pid) return true;
+    if (await holderAlive(holder)) return false;
+    try {
+      unlinkSync(LOCK_PATH);
+    } catch {
+    }
+  }
+  return false;
 }
 function releaseLock() {
   try {
-    if (existsSync(LOCK_PATH) && readFileSync(LOCK_PATH, "utf8").trim() === String(process.pid)) {
-      unlinkSync(LOCK_PATH);
-    }
+    if (readFileSync(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync(LOCK_PATH);
   } catch {
   }
 }
-var ACTIVE = CHANNEL_MODE && acquireLock();
-var PASSIVE = CHANNEL_MODE && !ACTIVE;
-var IDLE = !DEGRADED && !CHANNEL_MODE;
+var mode = DEGRADED ? "degraded" : "starting";
+var initialized = false;
+var started = false;
+var stopped = false;
 var state = {
   lastPullAt: null,
   lastPullError: null,
   dashboardOpen: false,
   authPausedUntil: 0
 };
+var injected = /* @__PURE__ */ new Set();
+function remember(id) {
+  injected.add(id);
+  if (injected.size > 500) injected.delete(injected.values().next().value);
+}
 function maskedKey() {
   if (!API_KEY) return "(nenhuma)";
-  return `${API_KEY.slice(0, 8)}\u2026${API_KEY.slice(-4)}`;
+  return `iok_\u2026${API_KEY.slice(-4)}`;
 }
 var AuthError = class extends Error {
 };
@@ -17083,8 +17125,7 @@ var INSTRUCTIONS = DEGRADED ? [
   "Se a tarefa for longa, mande um `reply` curto dizendo o que vai fazer, execute, e mande outro `reply` com o resultado.",
   "Nunca responda s\xF3 no terminal.",
   'Mensagens com chat_id="system" s\xE3o avisos do pr\xF3prio canal: repasse ao usu\xE1rio no terminal, n\xE3o use `reply` nelas.',
-  ...PASSIVE ? ["ATEN\xC7\xC3O: outra sess\xE3o do Claude Code nesta m\xE1quina j\xE1 \xE9 a ativa do Iron Office. Esta sess\xE3o N\xC3O recebe mensagens do site."] : [],
-  ...IDLE ? ["ATEN\xC7\xC3O: esta sess\xE3o n\xE3o foi aberta com o canal do Iron Office e N\xC3O recebe mensagens do site. Pra conversar pelo dashboard, o usu\xE1rio roda `npx iron-edge office` em outra aba."] : []
+  "S\xF3 a sess\xE3o aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sess\xE3o provavelmente n\xE3o \xE9 o canal: a ferramenta `status` confirma."
 ].join("\n");
 var mcp = new Server(
   { name: "iron-office", version: VERSION },
@@ -17117,7 +17158,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "status",
-    description: "Mostra o estado da conex\xE3o com o Iron Office (URL, chave mascarada, \xFAltimo pull, dashboard aberto).",
+    description: "Mostra o estado da conex\xE3o com o Iron Office (URL, chave mascarada, modo, \xFAltimo pull, dashboard aberto).",
     inputSchema: { type: "object", properties: {} }
   }
 ];
@@ -17125,6 +17166,14 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 function text(t, isError = false) {
   return { content: [{ type: "text", text: t }], ...isError ? { isError: true } : {} };
 }
+var MODE_LABEL = {
+  starting: "iniciando",
+  channel: "canal detectado, conectando",
+  degraded: "sem chave",
+  idle: "fora do canal (esta sess\xE3o n\xE3o recebe o chat; rode `npx iron-edge office`)",
+  passive: "passivo (outra sess\xE3o desta m\xE1quina \xE9 a ativa)",
+  active: "ativo"
+};
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
   if (name === "iron_office_unavailable") {
@@ -17138,7 +17187,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         `Iron Office ${VERSION}`,
         `URL: ${BASE}`,
         `Chave: ${maskedKey()}`,
-        `Modo: ${IDLE ? "fora do canal (rode `npx iron-edge office`)" : PASSIVE ? "passivo (outra sess\xE3o \xE9 a ativa)" : "ativo"}`,
+        `Modo: ${MODE_LABEL[mode]}`,
         `\xDAltimo pull: ${state.lastPullAt ?? "nenhum ainda"}${state.lastPullError ? ` (erro: ${state.lastPullError})` : ""}`,
         `Dashboard aberto: ${state.dashboardOpen ? "sim" : "n\xE3o"}`,
         `Pasta: ${process.cwd()}`
@@ -17146,8 +17195,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     );
   }
   if (name === "reply") {
-    if (IDLE) return text("Esta sess\xE3o n\xE3o \xE9 o canal do Iron Office. A resposta sai pela sess\xE3o aberta com `npx iron-edge office`.", true);
-    if (PASSIVE) return text("Outra sess\xE3o do Claude Code nesta m\xE1quina \xE9 a ativa do Iron Office. Responda por ela.", true);
+    if (mode !== "active") {
+      return text(`Esta sess\xE3o n\xE3o responde o Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
+    }
     const chatId = String(args.chat_id ?? "");
     const body = String(args.text ?? "").trim();
     if (!body) return text("Texto vazio.", true);
@@ -17164,24 +17214,53 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
   return text(`Ferramenta desconhecida: ${name}`, true);
 });
-function notify(content, meta2) {
-  return mcp.notification({ method: "notifications/claude/channel", params: { content, meta: meta2 } }).catch((e) => log(`falhou ao entregar na sess\xE3o: ${e.message}`));
+async function notify(content, meta2) {
+  try {
+    await mcp.notification({ method: "notifications/claude/channel", params: { content, meta: meta2 } });
+    return true;
+  } catch (e) {
+    log(`falhou ao entregar na sess\xE3o: ${e.message}`);
+    return false;
+  }
 }
 var backoff = 0;
-var stopped = false;
 var authWarned = false;
 async function pullOnce() {
   const data = await api("/api/chat/pull");
   state.lastPullAt = (/* @__PURE__ */ new Date()).toISOString();
   state.lastPullError = null;
-  state.dashboardOpen = !!data.dashboard_open;
-  for (const m of data.messages ?? []) {
-    await notify(m.content, {
-      chat_id: m.conversation_id,
+  state.dashboardOpen = data?.dashboard_open === true;
+  const toAck = [];
+  const messages = Array.isArray(data?.messages) ? data.messages : [];
+  for (const m of messages) {
+    if (!m || typeof m.id !== "string") continue;
+    if (injected.has(m.id)) {
+      toAck.push(m.id);
+      continue;
+    }
+    const content = typeof m.content === "string" ? m.content.trim() : "";
+    if (!content) {
+      log(`mensagem ${m.id} sem texto: descartada`);
+      toAck.push(m.id);
+      continue;
+    }
+    const ok = await notify(content, {
+      chat_id: typeof m.conversation_id === "string" && m.conversation_id ? m.conversation_id : DEFAULT_CONVERSATION,
       message_id: m.id,
       user: "aluno",
-      ts: m.created_at
+      ts: typeof m.created_at === "string" && m.created_at ? m.created_at : (/* @__PURE__ */ new Date()).toISOString()
     });
+    if (ok) {
+      remember(m.id);
+      toAck.push(m.id);
+    }
+  }
+  if (toAck.length > 0) {
+    try {
+      await api("/api/chat/ack", { method: "POST", body: { ids: toAck } });
+    } catch (e) {
+      log(`confirma\xE7\xE3o falhou (o banco reentrega em 60 s): ${e.message}`);
+    }
   }
 }
 async function pullLoop() {
@@ -17226,6 +17305,41 @@ async function presenceOnce() {
     if (!(e instanceof AuthError)) log(`presen\xE7a falhou: ${e.message}`);
   }
 }
+function becomeActive() {
+  mode = "active";
+  log(`ativo em ${BASE}`);
+  presenceOnce();
+  setInterval(() => {
+    if (Date.now() >= state.authPausedUntil) presenceOnce();
+  }, PRESENCE_MS).unref();
+  pullLoop();
+}
+async function maybeStart() {
+  if (started || !initialized || mode === "starting" || stopped) return;
+  started = true;
+  if (mode === "degraded") {
+    log("sem chave em ~/.claude/iron-office-api-key: modo degradado");
+    return;
+  }
+  if (mode === "idle") {
+    log("sess\xE3o sem o canal: n\xE3o puxa mensagens (s\xF3 os hooks de telemetria rodam)");
+    return;
+  }
+  if (await acquireLock()) {
+    becomeActive();
+    return;
+  }
+  mode = "passive";
+  log("outra sess\xE3o j\xE1 \xE9 a ativa: modo passivo (tenta assumir a cada 15 s)");
+  const retake = setInterval(async () => {
+    if (stopped) return clearInterval(retake);
+    if (await acquireLock()) {
+      clearInterval(retake);
+      becomeActive();
+    }
+  }, RETAKE_MS);
+  retake.unref();
+}
 function shutdown() {
   stopped = true;
   releaseLock();
@@ -17233,20 +17347,17 @@ function shutdown() {
 }
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+process.on("SIGHUP", shutdown);
 process.on("exit", releaseLock);
 process.stdin.on("end", shutdown);
+mcp.oninitialized = () => {
+  initialized = true;
+  maybeStart();
+};
 await mcp.connect(new StdioServerTransport());
-if (DEGRADED) {
-  log("sem chave em ~/.claude/iron-office-api-key: modo degradado");
-} else if (IDLE) {
-  log("sess\xE3o sem o canal: n\xE3o puxa mensagens (s\xF3 os hooks de telemetria rodam)");
-} else if (PASSIVE) {
-  log("outra sess\xE3o j\xE1 \xE9 a ativa: modo passivo");
-} else {
-  log(`ativo em ${BASE}`);
-  presenceOnce();
-  setInterval(() => {
-    if (Date.now() >= state.authPausedUntil) presenceOnce();
-  }, PRESENCE_MS).unref();
-  pullLoop();
+if (!DEGRADED) {
+  detectChannelMode().then((isChannel) => {
+    mode = isChannel ? "channel" : "idle";
+    maybeStart();
+  });
 }

@@ -27,26 +27,46 @@ O motor é o seu Claude Code (sua assinatura, seus arquivos). O site é só a ja
 ```bash
 claude plugin marketplace add filipecoff21-code/iron-office-channel
 claude plugin install iron-office@iron-office-channel --scope user
-claude --dangerously-load-development-channels plugin:iron-office@iron-office-channel
+IRON_OFFICE_CHANNEL=1 claude --dangerously-load-development-channels plugin:iron-office@iron-office-channel
 ```
+
+Prefira `npx iron-edge office`, que faz isso tudo e confere cada passo.
 
 ## Como funciona
 
 | Peça | O que faz |
 |---|---|
-| `dist/server.mjs` | Servidor MCP (canal). Puxa as mensagens do site (`GET /api/chat/pull`, a cada 2 s com o chat aberto, 15 s fechado), injeta na sessão e expõe a ferramenta `reply`. Marca presença a cada 30 s. |
-| `hooks/post-event.mjs` | Hooks `PostToolUse`, `SubagentStart`, `SubagentStop` e `Stop` mandam a atividade pro `POST /api/events` (feed e mapa 3D). `Read`/`Grep`/`Glob` ficam de fora. Sem chave, não manda nada. |
+| `dist/server.mjs` | Servidor MCP (canal). Puxa as mensagens do site (`GET /api/chat/pull`, a cada 2 s com o chat aberto, 15 s fechado), injeta na sessão, confirma a entrega (`POST /api/chat/ack`) e expõe a ferramenta `reply`. Marca presença a cada 30 s. |
+| `hooks/post-event.mjs` | Hooks `PostToolUse`, `SubagentStart`, `SubagentStop` e `Stop` mandam a atividade pro `POST /api/events` (feed e mapa 3D). |
 
-- Só **uma** sessão por máquina recebe as mensagens (lock em `~/.iron/office.lock`). As outras sobem em modo passivo.
+- **Só a sessão aberta com o canal recebe o chat.** O plugin fica ligado em toda sessão do Claude Code (por causa dos hooks), mas uma aba comum não puxa mensagem nenhuma.
+- **Entrega garantida:** a mensagem só vira "entregue" depois que a sessão recebeu. Se a internet cair no meio, ela volta pra fila em 60 s.
+- **Mensagem velha não é executada:** o que ficou mais de 15 minutos esperando (terminal fechado) expira, e o chat avisa pra mandar de novo.
+- Só **uma** sessão por máquina recebe as mensagens (lock em `~/.iron/office.lock`). As outras ficam passivas e assumem quando a ativa fecha.
 - Sem chave: sobe em modo degradado e só explica como resolver.
 - Chave inválida: avisa uma vez no terminal e tenta de novo depois de 5 minutos.
 - Pra testar contra um servidor local: `IRON_OFFICE_URL=http://localhost:3000`.
+
+## O que sai da sua máquina
+
+Com a chave do Iron Office salva, **toda sessão** do Claude Code manda pro seu painel (visível só pra você):
+
+- o nome de cada ferramenta usada (menos `Read`, `Grep` e `Glob`);
+- o **caminho** dos arquivos criados ou editados (nunca o conteúdo);
+- os primeiros 200 caracteres de cada comando de terminal e da resposta dele;
+- buscas na web e endereços visitados (sem os parâmetros);
+- o nome dos agentes acionados.
+
+Chaves, tokens e senhas que aparecem nesses campos (padrões de Stripe, Shopify, Meta, GitHub, OpenAI, Supabase, JWT, `Bearer`, `ALGO_KEY=`…) são apagados **antes** de sair.
+
+**Pra desligar:** `claude plugin disable iron-office@iron-office-channel` (ou `uninstall`). Apagar `~/.claude/iron-office-api-key` também corta todo envio.
 
 ## Desenvolvimento
 
 ```bash
 npm install
 npm run build   # gera dist/server.mjs (commitado, sem dependência de runtime)
+npm test        # build + testes sem rede (servidor falso, HOME temporário)
 ```
 
 Requer Node 18+.

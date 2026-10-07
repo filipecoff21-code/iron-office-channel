@@ -1,14 +1,14 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "iron-office-channel",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Canal do Iron Office para o Claude Code",
   "owner": { "name": "Filipe Coffone" },
   "plugins": [
     {
       "name": "iron-office",
       "description": "Conversa com o Iron pelo dashboard do Iron Office e mostra os agentes trabalhando.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "source": "./",
       "category": "channels"
     }

@@ -5,30 +5,39 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
 
-const VERSION = "0.1.1";
+const VERSION = "0.2.0";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
 const LOCK_PATH = join(LOCK_DIR, "office.lock");
+const DEFAULT_CONVERSATION = "00000000-0000-0000-0000-000000000001";
 
 const FAST_MS = 2_000;
 const SLOW_MS = 15_000;
 const MAX_BACKOFF_MS = 60_000;
 const AUTH_PAUSE_MS = 5 * 60_000;
 const PRESENCE_MS = 30_000;
+const RETAKE_MS = 15_000;
 
 function log(msg) {
   process.stderr.write(`[iron-office] ${msg}\n`);
 }
 
+// A chave pode ter sido gravada pelo `echo` do Windows (UTF-16 com BOM) ou com quebra de linha:
+// normaliza antes de usar, senão o servidor recebe lixo e responde 401 pra sempre.
 function readKey() {
   try {
-    return readFileSync(KEY_PATH, "utf8").trim();
+    const buf = readFileSync(KEY_PATH);
+    const utf16 = buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe;
+    return buf
+      .toString(utf16 ? "utf16le" : "utf8")
+      .replace(/[﻿\u0000]/g, "")
+      .trim();
   } catch {
     return "";
   }
@@ -37,51 +46,69 @@ function readKey() {
 const API_KEY = readKey();
 const DEGRADED = !API_KEY;
 
+// ─── Processos (detecção do canal e dono do lock) ───────────────────────
+function run(cmd, args) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { encoding: "utf8", timeout: 5000, windowsHide: true }, (err, stdout) => {
+      resolve(err ? null : String(stdout || ""));
+    });
+  });
+}
+
+async function processInfo(pid) {
+  if (process.platform === "win32") {
+    const out = await run("powershell", [
+      "-NoProfile",
+      "-Command",
+      `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; "$($p.ParentProcessId)|$($p.CommandLine)"`,
+    ]);
+    const s = (out || "").trim();
+    const i = s.indexOf("|");
+    if (i < 0) return null;
+    return { ppid: parseInt(s.slice(0, i), 10), cmd: s.slice(i + 1) };
+  }
+  const out = await run("ps", ["-o", "ppid=,command=", "-p", String(pid)]);
+  const m = (out || "").trim().match(/^(\d+)\s+(.*)$/s);
+  if (!m) return null;
+  return { ppid: parseInt(m[1], 10), cmd: m[2] };
+}
+
 // ─── Esta sessão é o canal? ─────────────────────────────────────────────
 // O plugin fica ligado em TODA sessão do Claude Code (hooks de telemetria), mas só a sessão
-// aberta com o canal (`npx iron-edge office`) pode puxar mensagens: uma sessão comum puxaria,
-// marcaria como entregue e o Claude ignoraria a notificação — a mensagem sumiria.
-// O cliente não anuncia o canal no initialize (medido em 06/10/2026), então lemos a linha de
-// comando dos processos acima deste. Sem conseguir ler, mantém o comportamento de canal.
+// aberta com o canal (`npx iron-edge office`) pode puxar mensagens: uma sessão comum puxaria a
+// mensagem e o Claude ignoraria a notificação. O cliente não anuncia o canal no initialize
+// (medido em 06/10/2026). Ordem: (1) env IRON_OFFICE_CHANNEL=1, que o `iron-edge office` injeta;
+// (2) a linha de comando de um processo claude/node acima deste com a flag de canal seguida do
+// id do plugin. Sem conseguir ler, fica OCIOSO (falha fechada): perder o chat é melhor que perder
+// mensagem.
 const CHANNEL_ID = "iron-office@iron-office-channel";
+const CHANNEL_FLAGS = new Set(["--dangerously-load-development-channels", "--channels"]);
 
-function processInfo(pid) {
-  try {
-    if (process.platform === "win32") {
-      const r = spawnSync(
-        "powershell",
-        ["-NoProfile", "-Command", `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; "$($p.ParentProcessId)|$($p.CommandLine)"`],
-        { encoding: "utf8", timeout: 5000, windowsHide: true },
-      );
-      const out = (r.stdout || "").trim();
-      const i = out.indexOf("|");
-      if (r.status !== 0 || i < 0) return null;
-      return { ppid: parseInt(out.slice(0, i), 10), cmd: out.slice(i + 1) };
-    }
-    const r = spawnSync("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8", timeout: 5000 });
-    const m = (r.stdout || "").trim().match(/^(\d+)\s+(.*)$/s);
-    if (r.status !== 0 || !m) return null;
-    return { ppid: parseInt(m[1], 10), cmd: m[2] };
-  } catch {
-    return null;
+function isChannelCommand(cmd) {
+  const tokens = cmd.split(/\s+/).filter(Boolean);
+  const exe = (tokens[0] || "").split(/[\\/]/).pop().toLowerCase();
+  if (!/^(claude|node)(\.exe|\.cmd)?$/.test(exe)) return false;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const [flag, inline] = t.split("=", 2);
+    if (!CHANNEL_FLAGS.has(flag)) continue;
+    const value = inline ?? tokens[i + 1] ?? "";
+    if (value.split(",").some((v) => v.endsWith(CHANNEL_ID))) return true;
   }
+  return false;
 }
 
-function detectChannelMode() {
+async function detectChannelMode() {
   if (process.env.IRON_OFFICE_CHANNEL === "1") return true;
   let pid = process.ppid;
-  let readAny = false;
   for (let depth = 0; depth < 4 && pid > 1; depth++) {
-    const info = processInfo(pid);
-    if (!info) break;
-    readAny = true;
-    if (info.cmd.includes(CHANNEL_ID)) return true;
+    const info = await processInfo(pid);
+    if (!info) return false;
+    if (isChannelCommand(info.cmd)) return true;
     pid = info.ppid;
   }
-  return !readAny;
+  return false;
 }
-
-const CHANNEL_MODE = !DEGRADED && detectChannelMode();
 
 // ─── Lock: só UMA sessão por máquina faz o pull ─────────────────────────
 function pidAlive(pid) {
@@ -89,40 +116,66 @@ function pidAlive(pid) {
     process.kill(pid, 0);
     return true;
   } catch (e) {
-    return e && e.code === "EPERM";
+    return !!e && e.code === "EPERM";
   }
 }
 
-function acquireLock() {
+// O pid do lock pode ter sido reaproveitado por outro programa: só conta como dono se o processo
+// ainda for um servidor do iron-office. Sem conseguir ler, presume vivo (não rouba o lock).
+async function holderAlive(pid) {
+  if (!pid || pid === process.pid || !pidAlive(pid)) return false;
+  const info = await processInfo(pid);
+  return info ? info.cmd.includes("iron-office") : true;
+}
+
+async function acquireLock() {
   try {
     mkdirSync(LOCK_DIR, { recursive: true });
-    if (existsSync(LOCK_PATH)) {
-      const other = parseInt(readFileSync(LOCK_PATH, "utf8").trim(), 10);
-      if (other && other !== process.pid && pidAlive(other)) return false;
-    }
-    writeFileSync(LOCK_PATH, String(process.pid));
-    return true;
-  } catch (e) {
-    log(`lock falhou: ${e.message}; seguindo como ativo`);
-    return true;
+  } catch {
+    // segue: writeFile acusa se não der
   }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(LOCK_PATH, String(process.pid), { flag: "wx" }); // atômico: falha se já existe
+      return true;
+    } catch (e) {
+      if (!e || e.code !== "EEXIST") {
+        log(`lock indisponível (${e?.message}); seguindo sem lock`);
+        return true;
+      }
+    }
+    let holder = 0;
+    try {
+      holder = parseInt(readFileSync(LOCK_PATH, "utf8").trim(), 10);
+    } catch {
+      // lido vazio ou sumiu no meio: tenta de novo
+    }
+    if (holder === process.pid) return true;
+    if (await holderAlive(holder)) return false;
+    try {
+      unlinkSync(LOCK_PATH); // lock órfão
+    } catch {
+      // outro processo apagou antes: a próxima volta resolve
+    }
+  }
+  return false;
 }
 
 function releaseLock() {
   try {
-    if (existsSync(LOCK_PATH) && readFileSync(LOCK_PATH, "utf8").trim() === String(process.pid)) {
-      unlinkSync(LOCK_PATH);
-    }
+    if (readFileSync(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync(LOCK_PATH);
   } catch {
     // nada
   }
 }
 
-const ACTIVE = CHANNEL_MODE && acquireLock();
-const PASSIVE = CHANNEL_MODE && !ACTIVE;
-const IDLE = !DEGRADED && !CHANNEL_MODE;
+// ─── Estado ─────────────────────────────────────────────────────────────
+// mode: "starting" | "degraded" | "idle" | "channel" (detectado, pegando o lock) | "passive" | "active"
+let mode = DEGRADED ? "degraded" : "starting";
+let initialized = false;
+let started = false;
+let stopped = false;
 
-// ─── Estado (pro status) ────────────────────────────────────────────────
 const state = {
   lastPullAt: null,
   lastPullError: null,
@@ -130,9 +183,16 @@ const state = {
   authPausedUntil: 0,
 };
 
+// ids já injetados na sessão: se o ack falhar e o pull devolver de novo, só confirma, não repete
+const injected = new Set();
+function remember(id) {
+  injected.add(id);
+  if (injected.size > 500) injected.delete(injected.values().next().value);
+}
+
 function maskedKey() {
   if (!API_KEY) return "(nenhuma)";
-  return `${API_KEY.slice(0, 8)}…${API_KEY.slice(-4)}`;
+  return `iok_…${API_KEY.slice(-4)}`;
 }
 
 // ─── HTTP ───────────────────────────────────────────────────────────────
@@ -170,12 +230,7 @@ const INSTRUCTIONS = DEGRADED
       "Se a tarefa for longa, mande um `reply` curto dizendo o que vai fazer, execute, e mande outro `reply` com o resultado.",
       "Nunca responda só no terminal.",
       'Mensagens com chat_id="system" são avisos do próprio canal: repasse ao usuário no terminal, não use `reply` nelas.',
-      ...(PASSIVE
-        ? ["ATENÇÃO: outra sessão do Claude Code nesta máquina já é a ativa do Iron Office. Esta sessão NÃO recebe mensagens do site."]
-        : []),
-      ...(IDLE
-        ? ["ATENÇÃO: esta sessão não foi aberta com o canal do Iron Office e NÃO recebe mensagens do site. Pra conversar pelo dashboard, o usuário roda `npx iron-edge office` em outra aba."]
-        : []),
+      "Só a sessão aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sessão provavelmente não é o canal: a ferramenta `status` confirma.",
     ].join("\n");
 
 const mcp = new Server(
@@ -212,7 +267,7 @@ const TOOLS = DEGRADED
       },
       {
         name: "status",
-        description: "Mostra o estado da conexão com o Iron Office (URL, chave mascarada, último pull, dashboard aberto).",
+        description: "Mostra o estado da conexão com o Iron Office (URL, chave mascarada, modo, último pull, dashboard aberto).",
         inputSchema: { type: "object", properties: {} },
       },
     ];
@@ -222,6 +277,15 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 function text(t, isError = false) {
   return { content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) };
 }
+
+const MODE_LABEL = {
+  starting: "iniciando",
+  channel: "canal detectado, conectando",
+  degraded: "sem chave",
+  idle: "fora do canal (esta sessão não recebe o chat; rode `npx iron-edge office`)",
+  passive: "passivo (outra sessão desta máquina é a ativa)",
+  active: "ativo",
+};
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
@@ -239,7 +303,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         `Iron Office ${VERSION}`,
         `URL: ${BASE}`,
         `Chave: ${maskedKey()}`,
-        `Modo: ${IDLE ? "fora do canal (rode `npx iron-edge office`)" : PASSIVE ? "passivo (outra sessão é a ativa)" : "ativo"}`,
+        `Modo: ${MODE_LABEL[mode]}`,
         `Último pull: ${state.lastPullAt ?? "nenhum ainda"}${state.lastPullError ? ` (erro: ${state.lastPullError})` : ""}`,
         `Dashboard aberto: ${state.dashboardOpen ? "sim" : "não"}`,
         `Pasta: ${process.cwd()}`,
@@ -248,8 +312,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === "reply") {
-    if (IDLE) return text("Esta sessão não é o canal do Iron Office. A resposta sai pela sessão aberta com `npx iron-edge office`.", true);
-    if (PASSIVE) return text("Outra sessão do Claude Code nesta máquina é a ativa do Iron Office. Responda por ela.", true);
+    if (mode !== "active") {
+      return text(`Esta sessão não responde o Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
+    }
     const chatId = String(args.chat_id ?? "");
     const body = String(args.text ?? "").trim();
     if (!body) return text("Texto vazio.", true);
@@ -268,29 +333,60 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   return text(`Ferramenta desconhecida: ${name}`, true);
 });
 
-function notify(content, meta) {
-  return mcp
-    .notification({ method: "notifications/claude/channel", params: { content, meta } })
-    .catch((e) => log(`falhou ao entregar na sessão: ${e.message}`));
+// true só se a notificação foi escrita no transporte da sessão
+async function notify(content, meta) {
+  try {
+    await mcp.notification({ method: "notifications/claude/channel", params: { content, meta } });
+    return true;
+  } catch (e) {
+    log(`falhou ao entregar na sessão: ${e.message}`);
+    return false;
+  }
 }
 
 // ─── Loops ──────────────────────────────────────────────────────────────
 let backoff = 0;
-let stopped = false;
 let authWarned = false;
 
+// Entrega em 2 fases: o pull reivindica (claimed); só confirma (ack → delivered) o que de fato
+// entrou na sessão. O que não for confirmado em 60 s o banco devolve pra fila.
 async function pullOnce() {
   const data = await api("/api/chat/pull");
   state.lastPullAt = new Date().toISOString();
   state.lastPullError = null;
-  state.dashboardOpen = !!data.dashboard_open;
-  for (const m of data.messages ?? []) {
-    await notify(m.content, {
-      chat_id: m.conversation_id,
+  state.dashboardOpen = data?.dashboard_open === true;
+
+  const toAck = [];
+  const messages = Array.isArray(data?.messages) ? data.messages : [];
+  for (const m of messages) {
+    if (!m || typeof m.id !== "string") continue;
+    if (injected.has(m.id)) {
+      toAck.push(m.id);
+      continue;
+    }
+    const content = typeof m.content === "string" ? m.content.trim() : "";
+    if (!content) {
+      log(`mensagem ${m.id} sem texto: descartada`);
+      toAck.push(m.id);
+      continue;
+    }
+    const ok = await notify(content, {
+      chat_id: typeof m.conversation_id === "string" && m.conversation_id ? m.conversation_id : DEFAULT_CONVERSATION,
       message_id: m.id,
       user: "aluno",
-      ts: m.created_at,
+      ts: typeof m.created_at === "string" && m.created_at ? m.created_at : new Date().toISOString(),
     });
+    if (ok) {
+      remember(m.id);
+      toAck.push(m.id);
+    }
+  }
+  if (toAck.length > 0) {
+    try {
+      await api("/api/chat/ack", { method: "POST", body: { ids: toAck } });
+    } catch (e) {
+      log(`confirmação falhou (o banco reentrega em 60 s): ${e.message}`);
+    }
   }
 }
 
@@ -338,6 +434,45 @@ async function presenceOnce() {
   }
 }
 
+function becomeActive() {
+  mode = "active";
+  log(`ativo em ${BASE}`);
+  presenceOnce();
+  setInterval(() => {
+    if (Date.now() >= state.authPausedUntil) presenceOnce();
+  }, PRESENCE_MS).unref();
+  pullLoop();
+}
+
+// Só começa depois do handshake (initialize) E da detecção: notificação antes do initialize
+// o cliente descarta.
+async function maybeStart() {
+  if (started || !initialized || mode === "starting" || stopped) return;
+  started = true;
+  if (mode === "degraded") {
+    log("sem chave em ~/.claude/iron-office-api-key: modo degradado");
+    return;
+  }
+  if (mode === "idle") {
+    log("sessão sem o canal: não puxa mensagens (só os hooks de telemetria rodam)");
+    return;
+  }
+  if (await acquireLock()) {
+    becomeActive();
+    return;
+  }
+  mode = "passive";
+  log("outra sessão já é a ativa: modo passivo (tenta assumir a cada 15 s)");
+  const retake = setInterval(async () => {
+    if (stopped) return clearInterval(retake);
+    if (await acquireLock()) {
+      clearInterval(retake);
+      becomeActive();
+    }
+  }, RETAKE_MS);
+  retake.unref();
+}
+
 // ─── Boot ───────────────────────────────────────────────────────────────
 function shutdown() {
   stopped = true;
@@ -346,22 +481,20 @@ function shutdown() {
 }
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+process.on("SIGHUP", shutdown);
 process.on("exit", releaseLock);
 process.stdin.on("end", shutdown);
 
+mcp.oninitialized = () => {
+  initialized = true;
+  maybeStart();
+};
+
 await mcp.connect(new StdioServerTransport());
 
-if (DEGRADED) {
-  log("sem chave em ~/.claude/iron-office-api-key: modo degradado");
-} else if (IDLE) {
-  log("sessão sem o canal: não puxa mensagens (só os hooks de telemetria rodam)");
-} else if (PASSIVE) {
-  log("outra sessão já é a ativa: modo passivo");
-} else {
-  log(`ativo em ${BASE}`);
-  presenceOnce();
-  setInterval(() => {
-    if (Date.now() >= state.authPausedUntil) presenceOnce();
-  }, PRESENCE_MS).unref();
-  pullLoop();
+if (!DEGRADED) {
+  detectChannelMode().then((isChannel) => {
+    mode = isChannel ? "channel" : "idle";
+    maybeStart();
+  });
 }
