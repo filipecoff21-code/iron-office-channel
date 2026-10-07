@@ -1,0 +1,17 @@
+{
+  "description": "Iron Office: manda a atividade da sessão (ferramentas e agentes) pro feed e pro mapa 3D do dashboard",
+  "hooks": {
+    "PostToolUse": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-event.mjs\"", "timeout": 5 } ] }
+    ],
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-event.mjs\"", "timeout": 5 } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-event.mjs\"", "timeout": 5 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-event.mjs\"", "timeout": 5 } ] }
+    ]
+  }
+}

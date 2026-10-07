@@ -1,0 +1,19 @@
+{
+  "name": "iron-office-channel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Canal do Claude Code que liga o dashboard do Iron Office (iron-office.vercel.app) à sessão local do aluno.",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/server.mjs --bundle --platform=node --format=esm --target=node18 --outfile=dist/server.mjs --banner:js=\"import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "author": "Filipe Coffone",
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "esbuild": "^0.28.2"
+  }
+}

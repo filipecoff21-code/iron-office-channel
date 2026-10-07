@@ -1,0 +1,11 @@
+{
+  "name": "iron-office",
+  "displayName": "Iron Office",
+  "description": "Canal do Iron Office: conversa com o Iron pelo dashboard (iron-office.vercel.app) e mostra os agentes trabalhando no feed e no mapa 3D.",
+  "version": "0.1.0",
+  "author": { "name": "Filipe Coffone" },
+  "homepage": "https://iron-office.vercel.app",
+  "repository": "https://github.com/filipecoff21-code/iron-office-channel",
+  "license": "MIT",
+  "keywords": ["channel", "mcp", "iron-edge"]
+}
