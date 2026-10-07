@@ -16949,8 +16949,9 @@ var StdioServerTransport = class {
 // src/server.mjs
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-var VERSION = "0.1.0";
+var VERSION = "0.1.1";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");
@@ -16973,6 +16974,42 @@ function readKey() {
 }
 var API_KEY = readKey();
 var DEGRADED = !API_KEY;
+var CHANNEL_ID = "iron-office@iron-office-channel";
+function processInfo(pid) {
+  try {
+    if (process.platform === "win32") {
+      const r2 = spawnSync(
+        "powershell",
+        ["-NoProfile", "-Command", `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; "$($p.ParentProcessId)|$($p.CommandLine)"`],
+        { encoding: "utf8", timeout: 5e3, windowsHide: true }
+      );
+      const out = (r2.stdout || "").trim();
+      const i = out.indexOf("|");
+      if (r2.status !== 0 || i < 0) return null;
+      return { ppid: parseInt(out.slice(0, i), 10), cmd: out.slice(i + 1) };
+    }
+    const r = spawnSync("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8", timeout: 5e3 });
+    const m = (r.stdout || "").trim().match(/^(\d+)\s+(.*)$/s);
+    if (r.status !== 0 || !m) return null;
+    return { ppid: parseInt(m[1], 10), cmd: m[2] };
+  } catch {
+    return null;
+  }
+}
+function detectChannelMode() {
+  if (process.env.IRON_OFFICE_CHANNEL === "1") return true;
+  let pid = process.ppid;
+  let readAny = false;
+  for (let depth = 0; depth < 4 && pid > 1; depth++) {
+    const info = processInfo(pid);
+    if (!info) break;
+    readAny = true;
+    if (info.cmd.includes(CHANNEL_ID)) return true;
+    pid = info.ppid;
+  }
+  return !readAny;
+}
+var CHANNEL_MODE = !DEGRADED && detectChannelMode();
 function pidAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -17003,8 +17040,9 @@ function releaseLock() {
   } catch {
   }
 }
-var ACTIVE = !DEGRADED && acquireLock();
-var PASSIVE = !DEGRADED && !ACTIVE;
+var ACTIVE = CHANNEL_MODE && acquireLock();
+var PASSIVE = CHANNEL_MODE && !ACTIVE;
+var IDLE = !DEGRADED && !CHANNEL_MODE;
 var state = {
   lastPullAt: null,
   lastPullError: null,
@@ -17045,7 +17083,8 @@ var INSTRUCTIONS = DEGRADED ? [
   "Se a tarefa for longa, mande um `reply` curto dizendo o que vai fazer, execute, e mande outro `reply` com o resultado.",
   "Nunca responda s\xF3 no terminal.",
   'Mensagens com chat_id="system" s\xE3o avisos do pr\xF3prio canal: repasse ao usu\xE1rio no terminal, n\xE3o use `reply` nelas.',
-  ...PASSIVE ? ["ATEN\xC7\xC3O: outra sess\xE3o do Claude Code nesta m\xE1quina j\xE1 \xE9 a ativa do Iron Office. Esta sess\xE3o N\xC3O recebe mensagens do site."] : []
+  ...PASSIVE ? ["ATEN\xC7\xC3O: outra sess\xE3o do Claude Code nesta m\xE1quina j\xE1 \xE9 a ativa do Iron Office. Esta sess\xE3o N\xC3O recebe mensagens do site."] : [],
+  ...IDLE ? ["ATEN\xC7\xC3O: esta sess\xE3o n\xE3o foi aberta com o canal do Iron Office e N\xC3O recebe mensagens do site. Pra conversar pelo dashboard, o usu\xE1rio roda `npx iron-edge office` em outra aba."] : []
 ].join("\n");
 var mcp = new Server(
   { name: "iron-office", version: VERSION },
@@ -17099,7 +17138,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         `Iron Office ${VERSION}`,
         `URL: ${BASE}`,
         `Chave: ${maskedKey()}`,
-        `Modo: ${PASSIVE ? "passivo (outra sess\xE3o \xE9 a ativa)" : "ativo"}`,
+        `Modo: ${IDLE ? "fora do canal (rode `npx iron-edge office`)" : PASSIVE ? "passivo (outra sess\xE3o \xE9 a ativa)" : "ativo"}`,
         `\xDAltimo pull: ${state.lastPullAt ?? "nenhum ainda"}${state.lastPullError ? ` (erro: ${state.lastPullError})` : ""}`,
         `Dashboard aberto: ${state.dashboardOpen ? "sim" : "n\xE3o"}`,
         `Pasta: ${process.cwd()}`
@@ -17107,6 +17146,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     );
   }
   if (name === "reply") {
+    if (IDLE) return text("Esta sess\xE3o n\xE3o \xE9 o canal do Iron Office. A resposta sai pela sess\xE3o aberta com `npx iron-edge office`.", true);
     if (PASSIVE) return text("Outra sess\xE3o do Claude Code nesta m\xE1quina \xE9 a ativa do Iron Office. Responda por ela.", true);
     const chatId = String(args.chat_id ?? "");
     const body = String(args.text ?? "").trim();
@@ -17198,6 +17238,8 @@ process.stdin.on("end", shutdown);
 await mcp.connect(new StdioServerTransport());
 if (DEGRADED) {
   log("sem chave em ~/.claude/iron-office-api-key: modo degradado");
+} else if (IDLE) {
+  log("sess\xE3o sem o canal: n\xE3o puxa mensagens (s\xF3 os hooks de telemetria rodam)");
 } else if (PASSIVE) {
   log("outra sess\xE3o j\xE1 \xE9 a ativa: modo passivo");
 } else {

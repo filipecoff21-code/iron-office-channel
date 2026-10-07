@@ -7,9 +7,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -35,6 +36,52 @@ function readKey() {
 
 const API_KEY = readKey();
 const DEGRADED = !API_KEY;
+
+// ─── Esta sessão é o canal? ─────────────────────────────────────────────
+// O plugin fica ligado em TODA sessão do Claude Code (hooks de telemetria), mas só a sessão
+// aberta com o canal (`npx iron-edge office`) pode puxar mensagens: uma sessão comum puxaria,
+// marcaria como entregue e o Claude ignoraria a notificação — a mensagem sumiria.
+// O cliente não anuncia o canal no initialize (medido em 06/10/2026), então lemos a linha de
+// comando dos processos acima deste. Sem conseguir ler, mantém o comportamento de canal.
+const CHANNEL_ID = "iron-office@iron-office-channel";
+
+function processInfo(pid) {
+  try {
+    if (process.platform === "win32") {
+      const r = spawnSync(
+        "powershell",
+        ["-NoProfile", "-Command", `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; "$($p.ParentProcessId)|$($p.CommandLine)"`],
+        { encoding: "utf8", timeout: 5000, windowsHide: true },
+      );
+      const out = (r.stdout || "").trim();
+      const i = out.indexOf("|");
+      if (r.status !== 0 || i < 0) return null;
+      return { ppid: parseInt(out.slice(0, i), 10), cmd: out.slice(i + 1) };
+    }
+    const r = spawnSync("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8", timeout: 5000 });
+    const m = (r.stdout || "").trim().match(/^(\d+)\s+(.*)$/s);
+    if (r.status !== 0 || !m) return null;
+    return { ppid: parseInt(m[1], 10), cmd: m[2] };
+  } catch {
+    return null;
+  }
+}
+
+function detectChannelMode() {
+  if (process.env.IRON_OFFICE_CHANNEL === "1") return true;
+  let pid = process.ppid;
+  let readAny = false;
+  for (let depth = 0; depth < 4 && pid > 1; depth++) {
+    const info = processInfo(pid);
+    if (!info) break;
+    readAny = true;
+    if (info.cmd.includes(CHANNEL_ID)) return true;
+    pid = info.ppid;
+  }
+  return !readAny;
+}
+
+const CHANNEL_MODE = !DEGRADED && detectChannelMode();
 
 // ─── Lock: só UMA sessão por máquina faz o pull ─────────────────────────
 function pidAlive(pid) {
@@ -71,8 +118,9 @@ function releaseLock() {
   }
 }
 
-const ACTIVE = !DEGRADED && acquireLock();
-const PASSIVE = !DEGRADED && !ACTIVE;
+const ACTIVE = CHANNEL_MODE && acquireLock();
+const PASSIVE = CHANNEL_MODE && !ACTIVE;
+const IDLE = !DEGRADED && !CHANNEL_MODE;
 
 // ─── Estado (pro status) ────────────────────────────────────────────────
 const state = {
@@ -124,6 +172,9 @@ const INSTRUCTIONS = DEGRADED
       'Mensagens com chat_id="system" são avisos do próprio canal: repasse ao usuário no terminal, não use `reply` nelas.',
       ...(PASSIVE
         ? ["ATENÇÃO: outra sessão do Claude Code nesta máquina já é a ativa do Iron Office. Esta sessão NÃO recebe mensagens do site."]
+        : []),
+      ...(IDLE
+        ? ["ATENÇÃO: esta sessão não foi aberta com o canal do Iron Office e NÃO recebe mensagens do site. Pra conversar pelo dashboard, o usuário roda `npx iron-edge office` em outra aba."]
         : []),
     ].join("\n");
 
@@ -188,7 +239,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         `Iron Office ${VERSION}`,
         `URL: ${BASE}`,
         `Chave: ${maskedKey()}`,
-        `Modo: ${PASSIVE ? "passivo (outra sessão é a ativa)" : "ativo"}`,
+        `Modo: ${IDLE ? "fora do canal (rode `npx iron-edge office`)" : PASSIVE ? "passivo (outra sessão é a ativa)" : "ativo"}`,
         `Último pull: ${state.lastPullAt ?? "nenhum ainda"}${state.lastPullError ? ` (erro: ${state.lastPullError})` : ""}`,
         `Dashboard aberto: ${state.dashboardOpen ? "sim" : "não"}`,
         `Pasta: ${process.cwd()}`,
@@ -197,6 +248,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === "reply") {
+    if (IDLE) return text("Esta sessão não é o canal do Iron Office. A resposta sai pela sessão aberta com `npx iron-edge office`.", true);
     if (PASSIVE) return text("Outra sessão do Claude Code nesta máquina é a ativa do Iron Office. Responda por ela.", true);
     const chatId = String(args.chat_id ?? "");
     const body = String(args.text ?? "").trim();
@@ -301,6 +353,8 @@ await mcp.connect(new StdioServerTransport());
 
 if (DEGRADED) {
   log("sem chave em ~/.claude/iron-office-api-key: modo degradado");
+} else if (IDLE) {
+  log("sessão sem o canal: não puxa mensagens (só os hooks de telemetria rodam)");
 } else if (PASSIVE) {
   log("outra sessão já é a ativa: modo passivo");
 } else {

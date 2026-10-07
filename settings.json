@@ -1,8 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "mcp__plugin_iron_office_iron_office__reply",
-      "mcp__plugin_iron_office_iron_office__status"
+      "mcp__plugin_iron-office_iron-office__reply",
+      "mcp__plugin_iron-office_iron-office__status"
     ]
   }
 }
