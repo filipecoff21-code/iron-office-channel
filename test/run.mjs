@@ -328,6 +328,13 @@ async function runHook(home, url, input, channel = "1") {
   try { got = JSON.parse(r3?.content?.[0]?.text ?? "{}"); } catch {}
   check("devolve { id, url } com /deliverables?id=", got.id === "d-123" && got.url === `${f.url}/deliverables?id=d-123` && !r3?.isError, JSON.stringify(r3));
   check("título vazio = erro, sem POST", result(s, 4)?.isError === true && post.length === 1);
+  check("sem card, o POST não leva o campo", !("card" in post[0].body));
+  const card = { kind: "auditoria", score: 6.5, summary: "s", items: [1, 2, 3, 4, 5].map((n) => ({ title: `t${n}`, why: "w", effort: "e", action: `a${n}` })) };
+  call(s, 6, { title: "Com cartão", agent: "iron-auditor", content: "c", card });
+  await sleep(600);
+  const comCard = f.calls.filter((c) => c.path === "/api/deliverables").at(-1);
+  check("card vai no corpo do POST", comCard?.body?.title === "Com cartão" && comCard.body.card?.score === 6.5, JSON.stringify(comCard?.body?.card));
+  check("card com 5 itens chega como está (quem poda é o servidor)", comCard?.body?.card?.items?.length === 5);
   s.p.kill();
 
   const idle = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "" });
@@ -335,7 +342,7 @@ async function runHook(home, url, input, channel = "1") {
   await sleep(1500);
   call(idle, 5, { title: "t", agent: "iron-auditor", content: "c" });
   await sleep(500);
-  check("fora do canal: deliver recusa e não salva nada", result(idle, 5)?.isError === true && f.calls.filter((c) => c.path === "/api/deliverables").length === 1);
+  check("fora do canal: deliver recusa e não salva nada", result(idle, 5)?.isError === true && f.calls.filter((c) => c.path === "/api/deliverables").length === 2);
   idle.p.kill();
   f.srv.close();
 }

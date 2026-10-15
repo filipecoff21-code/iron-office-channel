@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 
-const VERSION = "0.3.2";
+const VERSION = "0.3.3";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -238,6 +238,7 @@ const INSTRUCTIONS = DEGRADED
       "Nunca responda só no terminal.",
       "Pedidos que começam com `usa o <agente>:` são atalhos do site: chame esse agente como subagente (ferramenta Agent com subagent_type = <agente>) e responda pelo `reply` quando ele terminar.",
       "Pedido do canal que terminou num relatório (resultado de subagente como iron-auditor ou iron-spy, copy longa, plano): chame `deliver` com o título, o agente e o conteúdo completo ANTES do `reply`, e termine o `reply` com a `url` que o `deliver` devolveu. Resposta curta de conversa não vira entrega.",
+      "Auditoria ou Spy: o relatório do agente termina com um bloco `## Cartão` (JSON). Passe esse JSON em `card` no `deliver`, sem reescrever. O `reply` final vira 1 ou 2 linhas (nota + frase) e a url; o cartão aparece sozinho no chat.",
       'Mensagens com chat_id="system" são avisos do próprio canal: repasse ao usuário no terminal, não use `reply` nelas.',
       "Só a sessão aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sessão provavelmente não é o canal: a ferramenta `status` confirma.",
     ].join("\n");
@@ -285,6 +286,11 @@ const TOOLS = DEGRADED
             agent: { type: "string", description: "Agente que produziu, ex.: iron-auditor, iron-spy, iron-copy. Iron direto = iron-ceo." },
             content: { type: "string", description: "Conteúdo completo em markdown (até 200 mil caracteres)." },
             type: { type: "string", description: "Opcional: tipo da entrega (auditoria, relatorio, copy, plano…). Vira etiqueta." },
+            card: {
+              type: "object",
+              description:
+                "Opcional: o JSON do bloco `## Cartão` que o agente devolveu, sem reescrever: { kind, score, summary, items: [{ title, why, effort, action }] }.",
+            },
           },
           required: ["title", "agent", "content"],
         },
@@ -363,11 +369,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const agent = String(args.agent ?? "").trim() || "iron-ceo";
     const content = String(args.content ?? "");
     const type = String(args.type ?? "").trim();
+    const card = args.card && typeof args.card === "object" && !Array.isArray(args.card) ? args.card : null;
     if (!title || !content.trim()) return text("title e content são obrigatórios.", true);
     try {
       const res = await api("/api/deliverables", {
         method: "POST",
-        body: { agent_name: agent, title, content, tags: type ? [type] : [] },
+        // o cartão vai como veio: quem poda nos limites é o servidor
+        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...(card ? { card } : {}) },
       });
       const id = res?.deliverable?.id;
       if (typeof id !== "string" || !id) return text("O Iron Office não devolveu o id da entrega.", true);
