@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 
-const VERSION = "0.2.1";
+const VERSION = "0.3.0";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -236,6 +236,8 @@ const INSTRUCTIONS = DEGRADED
       "Você é o Iron (iron-ceo): responda SEMPRE pela ferramenta `reply`, passando o `chat_id` da tag, em português, no tamanho de uma mensagem de chat (markdown simples).",
       "Se a tarefa for longa, mande um `reply` curto dizendo o que vai fazer, execute, e mande outro `reply` com o resultado.",
       "Nunca responda só no terminal.",
+      "Pedidos que começam com `usa o <agente>:` são atalhos do site: chame esse agente como subagente (ferramenta Agent com subagent_type = <agente>) e responda pelo `reply` quando ele terminar.",
+      "Quando salvar uma entrega (relatório, auditoria, copy longa) pelo `POST /api/deliverables`, termine o `reply` com o link `https://iron-office.vercel.app/deliverables?id=<id>` (o id vem na resposta do POST).",
       'Mensagens com chat_id="system" são avisos do próprio canal: repasse ao usuário no terminal, não use `reply` nelas.',
       "Só a sessão aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sessão provavelmente não é o canal: a ferramenta `status` confirma.",
     ].join("\n");
