@@ -1,7 +1,7 @@
 // Iron Office — servidor de canal do Claude Code.
 // Puxa as mensagens que o aluno escreveu no dashboard (iron-office.vercel.app/chat),
-// injeta na sessão como notifications/claude/channel, e expõe a ferramenta `reply`
-// pra resposta do Iron voltar pro site.
+// injeta na sessão como notifications/claude/channel, e expõe as ferramentas `reply` (resposta
+// do Iron volta pro site) e `deliver` (salva a entrega em /deliverables e devolve o link).
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -237,7 +237,7 @@ const INSTRUCTIONS = DEGRADED
       "Se a tarefa for longa, mande um `reply` curto dizendo o que vai fazer, execute, e mande outro `reply` com o resultado.",
       "Nunca responda só no terminal.",
       "Pedidos que começam com `usa o <agente>:` são atalhos do site: chame esse agente como subagente (ferramenta Agent com subagent_type = <agente>) e responda pelo `reply` quando ele terminar.",
-      "Quando salvar uma entrega (relatório, auditoria, copy longa) pelo `POST /api/deliverables`, termine o `reply` com o link `https://iron-office.vercel.app/deliverables?id=<id>` (o id vem na resposta do POST).",
+      "Pedido do canal que terminou num relatório (resultado de subagente como iron-auditor ou iron-spy, copy longa, plano): chame `deliver` com o título, o agente e o conteúdo completo ANTES do `reply`, e termine o `reply` com a `url` que o `deliver` devolveu. Resposta curta de conversa não vira entrega.",
       'Mensagens com chat_id="system" são avisos do próprio canal: repasse ao usuário no terminal, não use `reply` nelas.',
       "Só a sessão aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sessão provavelmente não é o canal: a ferramenta `status` confirma.",
     ].join("\n");
@@ -272,6 +272,21 @@ const TOOLS = DEGRADED
             text: { type: "string", description: "Texto da resposta, markdown simples." },
           },
           required: ["chat_id", "text"],
+        },
+      },
+      {
+        name: "deliver",
+        description:
+          "Salva uma entrega (relatório, auditoria, copy longa) na tela Entregas do Iron Office e devolve { id, url }. Use antes do `reply` final de um pedido do canal; o `reply` termina com a url.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Título curto da entrega (até 300 caracteres)." },
+            agent: { type: "string", description: "Agente que produziu, ex.: iron-auditor, iron-spy, iron-copy. Iron direto = iron-ceo." },
+            content: { type: "string", description: "Conteúdo completo em markdown (até 200 mil caracteres)." },
+            type: { type: "string", description: "Opcional: tipo da entrega (auditoria, relatorio, copy, plano…). Vira etiqueta." },
+          },
+          required: ["title", "agent", "content"],
         },
       },
       {
@@ -336,6 +351,30 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text("Enviado ao Iron Office.");
     } catch (e) {
       return text(`Falhou ao enviar ao Iron Office: ${e.message}`, true);
+    }
+  }
+
+  if (name === "deliver") {
+    // só a sessão do canal: nas outras o plugin também está ligado, e o trabalho delas não é do site
+    if (mode !== "active") {
+      return text(`Esta sessão não salva entregas no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
+    }
+    const title = String(args.title ?? "").trim();
+    const agent = String(args.agent ?? "").trim() || "iron-ceo";
+    const content = String(args.content ?? "");
+    const type = String(args.type ?? "").trim();
+    if (!title || !content.trim()) return text("title e content são obrigatórios.", true);
+    try {
+      const res = await api("/api/deliverables", {
+        method: "POST",
+        body: { agent_name: agent, title, content, tags: type ? [type] : [] },
+      });
+      const id = res?.deliverable?.id;
+      if (typeof id !== "string" || !id) return text("O Iron Office não devolveu o id da entrega.", true);
+      const url = `${BASE}/deliverables?id=${encodeURIComponent(id)}`;
+      return text(JSON.stringify({ id, url }));
+    } catch (e) {
+      return text(`Falhou ao salvar a entrega: ${e.message}`, true);
     }
   }
 

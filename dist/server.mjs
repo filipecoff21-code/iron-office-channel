@@ -16951,7 +16951,7 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
-var VERSION = "0.3.0";
+var VERSION = "0.3.1";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");
@@ -17132,7 +17132,7 @@ var INSTRUCTIONS = DEGRADED ? [
   "Se a tarefa for longa, mande um `reply` curto dizendo o que vai fazer, execute, e mande outro `reply` com o resultado.",
   "Nunca responda s\xF3 no terminal.",
   "Pedidos que come\xE7am com `usa o <agente>:` s\xE3o atalhos do site: chame esse agente como subagente (ferramenta Agent com subagent_type = <agente>) e responda pelo `reply` quando ele terminar.",
-  "Quando salvar uma entrega (relat\xF3rio, auditoria, copy longa) pelo `POST /api/deliverables`, termine o `reply` com o link `https://iron-office.vercel.app/deliverables?id=<id>` (o id vem na resposta do POST).",
+  "Pedido do canal que terminou num relat\xF3rio (resultado de subagente como iron-auditor ou iron-spy, copy longa, plano): chame `deliver` com o t\xEDtulo, o agente e o conte\xFAdo completo ANTES do `reply`, e termine o `reply` com a `url` que o `deliver` devolveu. Resposta curta de conversa n\xE3o vira entrega.",
   'Mensagens com chat_id="system" s\xE3o avisos do pr\xF3prio canal: repasse ao usu\xE1rio no terminal, n\xE3o use `reply` nelas.',
   "S\xF3 a sess\xE3o aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sess\xE3o provavelmente n\xE3o \xE9 o canal: a ferramenta `status` confirma."
 ].join("\n");
@@ -17163,6 +17163,20 @@ var TOOLS = DEGRADED ? [
         text: { type: "string", description: "Texto da resposta, markdown simples." }
       },
       required: ["chat_id", "text"]
+    }
+  },
+  {
+    name: "deliver",
+    description: "Salva uma entrega (relat\xF3rio, auditoria, copy longa) na tela Entregas do Iron Office e devolve { id, url }. Use antes do `reply` final de um pedido do canal; o `reply` termina com a url.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "T\xEDtulo curto da entrega (at\xE9 300 caracteres)." },
+        agent: { type: "string", description: "Agente que produziu, ex.: iron-auditor, iron-spy, iron-copy. Iron direto = iron-ceo." },
+        content: { type: "string", description: "Conte\xFAdo completo em markdown (at\xE9 200 mil caracteres)." },
+        type: { type: "string", description: "Opcional: tipo da entrega (auditoria, relatorio, copy, plano\u2026). Vira etiqueta." }
+      },
+      required: ["title", "agent", "content"]
     }
   },
   {
@@ -17219,6 +17233,28 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text("Enviado ao Iron Office.");
     } catch (e) {
       return text(`Falhou ao enviar ao Iron Office: ${e.message}`, true);
+    }
+  }
+  if (name === "deliver") {
+    if (mode !== "active") {
+      return text(`Esta sess\xE3o n\xE3o salva entregas no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
+    }
+    const title = String(args.title ?? "").trim();
+    const agent = String(args.agent ?? "").trim() || "iron-ceo";
+    const content = String(args.content ?? "");
+    const type = String(args.type ?? "").trim();
+    if (!title || !content.trim()) return text("title e content s\xE3o obrigat\xF3rios.", true);
+    try {
+      const res = await api("/api/deliverables", {
+        method: "POST",
+        body: { agent_name: agent, title, content, tags: type ? [type] : [] }
+      });
+      const id = res?.deliverable?.id;
+      if (typeof id !== "string" || !id) return text("O Iron Office n\xE3o devolveu o id da entrega.", true);
+      const url = `${BASE}/deliverables?id=${encodeURIComponent(id)}`;
+      return text(JSON.stringify({ id, url }));
+    } catch (e) {
+      return text(`Falhou ao salvar a entrega: ${e.message}`, true);
     }
   }
   return text(`Ferramenta desconhecida: ${name}`, true);

@@ -85,10 +85,10 @@ function startServer(home, url, env = {}) {
 
 const notifs = (out) => out.filter((o) => o.msg.method === "notifications/claude/channel");
 
-async function runHook(home, url, input) {
+async function runHook(home, url, input, channel = "1") {
   return new Promise((resolve) => {
     const p = spawn(process.execPath, [HOOK], {
-      env: { ...process.env, HOME: home, USERPROFILE: home, IRON_OFFICE_URL: url },
+      env: { ...process.env, HOME: home, USERPROFILE: home, IRON_OFFICE_URL: url, IRON_OFFICE_CHANNEL: channel },
       stdio: ["pipe", "ignore", "ignore"],
     });
     p.on("exit", (code) => resolve(code));
@@ -266,6 +266,63 @@ async function runHook(home, url, input) {
   check("corte não parte emoji ao meio", !!emoji && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(emoji.body.tool_input.command));
   check("stdin vazio sai 0", code === 0);
   check("sem chave não envia nada", f.calls.length === antesSemChave);
+  f.srv.close();
+}
+
+// ─── 8. hook fora do canal não manda nada (onda 3.1, bloqueador B) ──────
+{
+  console.log("hook fora do canal");
+  const f = await fakeOffice(() => ({ json: {} }));
+  const home = casa();
+  const ev = (cmd) => ({ session_id: "s", cwd: "/outro/projeto", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: cmd } });
+  for (const v of ["", "0", "true"]) await runHook(home, f.url, ev(`ls ${v}`), v);
+  await runHook(home, f.url, { session_id: "s", hook_event_name: "Stop" }, "");
+  check("sem IRON_OFFICE_CHANNEL=1: 0 requisições", f.calls.length === 0, JSON.stringify(f.calls.map((c) => c.body)));
+  await runHook(home, f.url, ev("ls canal"), "1");
+  check("com IRON_OFFICE_CHANNEL=1: manda", f.calls.length === 1);
+  f.srv.close();
+}
+
+// ─── 9. deliver salva a entrega e devolve o link (onda 3.1, bloqueador A) ─
+{
+  console.log("deliver");
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/deliverables") return { json: { ok: true, deliverable: { id: "d-123", title: c.body.title } } };
+  });
+  const call = (s, id, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "deliver", arguments: args } });
+  const result = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  s.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+  call(s, 3, { title: "Auditoria de exemplo.com", agent: "iron-auditor", content: "# Relatório\nnota 7", type: "auditoria" });
+  call(s, 4, { title: "", agent: "iron-auditor", content: "x" });
+  await sleep(800);
+  const tools = s.out.find((o) => o.msg.id === 2)?.msg.result?.tools?.map((t) => t.name) ?? [];
+  check("tools/list tem reply, deliver e status", ["reply", "deliver", "status"].every((n) => tools.includes(n)), tools.join(","));
+  const post = f.calls.filter((c) => c.path === "/api/deliverables");
+  check(
+    "POST /api/deliverables com a chave e os campos da rota",
+    post.length === 1 && post[0].key === KEY && post[0].body.agent_name === "iron-auditor" && post[0].body.title === "Auditoria de exemplo.com" &&
+      post[0].body.content === "# Relatório\nnota 7" && JSON.stringify(post[0].body.tags) === '["auditoria"]',
+    JSON.stringify(post),
+  );
+  const r3 = result(s, 3);
+  let got = {};
+  try { got = JSON.parse(r3?.content?.[0]?.text ?? "{}"); } catch {}
+  check("devolve { id, url } com /deliverables?id=", got.id === "d-123" && got.url === `${f.url}/deliverables?id=d-123` && !r3?.isError, JSON.stringify(r3));
+  check("título vazio = erro, sem POST", result(s, 4)?.isError === true && post.length === 1);
+  s.p.kill();
+
+  const idle = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "" });
+  idle.handshake();
+  await sleep(1500);
+  call(idle, 5, { title: "t", agent: "iron-auditor", content: "c" });
+  await sleep(500);
+  check("fora do canal: deliver recusa e não salva nada", result(idle, 5)?.isError === true && f.calls.filter((c) => c.path === "/api/deliverables").length === 1);
+  idle.p.kill();
   f.srv.close();
 }
 

@@ -1,6 +1,9 @@
 // Iron Office — hook de telemetria.
 // Lê o JSON do hook no stdin e manda pro POST /api/events do Iron Office (feed e mapa 3D).
 // Regras: sem chave = sai em silêncio; timeout de 1,5 s; sai 0 SEMPRE (nunca bloqueia a sessão).
+// Só a sessão do canal manda (env IRON_OFFICE_CHANNEL=1, que o `npx iron-edge office` injeta e o
+// hook herda): o plugin fica ligado em toda sessão do Claude Code, e um `claude` aberto em outro
+// projeto não pode encher a coluna "Atividade" nem mandar os caminhos dele pro banco.
 //
 // O que sai da máquina é o MÍNIMO que o feed usa: nome da ferramenta, caminho do arquivo (nunca o
 // conteúdo), começo do comando e a descrição dele, busca, domínio visitado, nome e descrição do
@@ -115,6 +118,7 @@ function strip(obj) {
 }
 
 async function main() {
+  if (process.env.IRON_OFFICE_CHANNEL !== "1") return;
   const key = readKey();
   if (!key) return;
   let hook;
