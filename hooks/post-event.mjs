@@ -138,9 +138,11 @@ async function main() {
   const toolName = hook.tool_name ?? event;
   if (!toolName) return;
 
+  // ferramenta usada DENTRO de um subagente traz agent_id/agent_type no topo (medido no 2.1.301):
+  // vai junto pra coluna atribuir a ação ao agente certo e ao pedido dele
   const toolInput = isAgentEvent
     ? strip({ agent_type: cut(hook.agent_type, 80), agent_id: cut(hook.agent_id, 80) })
-    : strip(pickInput(toolName, hook.tool_input));
+    : strip({ ...pickInput(toolName, hook.tool_input), agent_id: cut(hook.agent_id, 40), agent_type: cut(hook.agent_type, 80) });
 
   const body = {
     tool_name: toolName,

@@ -16951,7 +16951,7 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
-var VERSION = "0.3.1";
+var VERSION = "0.3.2";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");

@@ -283,6 +283,20 @@ async function runHook(home, url, input, channel = "1") {
   f.srv.close();
 }
 
+// ─── 8b. evento leva o id do agente que o gerou (onda 4) ────────────────
+{
+  console.log("hook com agente");
+  const f = await fakeOffice(() => ({ json: {} }));
+  const home = casa();
+  await runHook(home, f.url, { session_id: "s", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "echo dentro" }, agent_id: "ab616b39dd66778d0", agent_type: "iron-auditor" });
+  await runHook(home, f.url, { session_id: "s", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "echo fora" } });
+  const dentro = f.calls.find((c) => c.body?.tool_input?.command === "echo dentro")?.body.tool_input;
+  const fora = f.calls.find((c) => c.body?.tool_input?.command === "echo fora")?.body.tool_input;
+  check("ferramenta dentro do subagente sai com agent_id e agent_type", dentro?.agent_id === "ab616b39dd66778d0" && dentro?.agent_type === "iron-auditor", JSON.stringify(dentro));
+  check("ferramenta do Iron sai sem agent_id", !!fora && !("agent_id" in fora) && !("agent_type" in fora), JSON.stringify(fora));
+  f.srv.close();
+}
+
 // ─── 9. deliver salva a entrega e devolve o link (onda 3.1, bloqueador A) ─
 {
   console.log("deliver");

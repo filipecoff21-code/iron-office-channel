@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
