@@ -347,6 +347,35 @@ async function runHook(home, url, input, channel = "1") {
   f.srv.close();
 }
 
+// ─── 10. shop_status / shop_query: a loja pelo plugin, em qualquer sessão (onda 6) ─
+{
+  console.log("loja Shopify");
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/shopify/graphql" && c.method === "GET") return { json: { connected: true, shopDomain: "loja.myshopify.com" } };
+    if (c.path === "/api/shopify/graphql" && c.method === "POST") return { json: { data: { shop: { name: "Loja" } } } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const result = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+
+  // fora do canal (modo idle): é como o aluno usa o iron-shopify num `claude` comum
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "" });
+  s.handshake();
+  await sleep(1500);
+  call(s, 2, "shop_status", {});
+  call(s, 3, "shop_query", { query: "query($n:Int!){ products(first:$n){ edges { node { id } } } }", variables: { n: 3 } });
+  call(s, 4, "shop_query", { query: "  " });
+  await sleep(800);
+  const get = f.calls.filter((c) => c.path === "/api/shopify/graphql" && c.method === "GET");
+  const post = f.calls.filter((c) => c.path === "/api/shopify/graphql" && c.method === "POST");
+  check("shop_status faz GET com x-api-key", get.length === 1 && get[0].key === KEY && /loja\.myshopify\.com/.test(result(s, 2)?.content?.[0]?.text ?? ""), JSON.stringify(result(s, 2)));
+  check("shop_query manda { query, variables } no POST", post.length === 1 && post[0].key === KEY && post[0].body.variables?.n === 3 && /products/.test(post[0].body.query), JSON.stringify(post));
+  check("shop_query sem query = erro, sem rede", result(s, 4)?.isError === true && post.length === 1);
+  check("as duas respondem fora do canal (modo idle)", !result(s, 2)?.isError && !result(s, 3)?.isError && /Loja/.test(result(s, 3)?.content?.[0]?.text ?? ""), JSON.stringify(result(s, 3)));
+  s.p.kill();
+  f.srv.close();
+}
+
 for (const d of lixo) {
   try {
     rmSync(d, { recursive: true, force: true });

@@ -37,6 +37,7 @@ Prefira `npx iron-edge office`, que faz isso tudo e confere cada passo.
 | Peça | O que faz |
 |---|---|
 | `dist/server.mjs` | Servidor MCP (canal). Puxa as mensagens do site (`GET /api/chat/pull`, a cada 2 s com o chat aberto, 15 s fechado), injeta na sessão, confirma a entrega (`POST /api/chat/ack`) e expõe as ferramentas `reply` (resposta no chat) e `deliver` (salva a entrega em `POST /api/deliverables`, com o cartão de ação opcional `card` que o chat mostra, e devolve o link `/deliverables?id=`). Marca presença a cada 30 s. |
+| ferramentas da loja | `shop_status` (a loja Shopify está conectada? `GET /api/shopify/graphql`) e `shop_query` (query ou mutation GraphQL da Admin API, `POST /api/shopify/graphql`; resposta acima de 60 kB vem cortada). Funcionam em **qualquer** sessão, não só no canal: é por elas que o agente `iron-shopify` fala com a loja, sem ler a chave nem fazer `curl` (desde a 0.3.4). |
 | `hooks/post-event.mjs` | Hooks `PostToolUse`, `SubagentStart`, `SubagentStop` e `Stop` mandam a atividade pro `POST /api/events` (feed e mapa 3D). Só na sessão do canal (`IRON_OFFICE_CHANNEL=1`): `claude` aberto em outra pasta não manda nada. Ferramenta usada dentro de um subagente leva o id e o tipo do agente que a usou. |
 
 - **Só a sessão aberta com o canal recebe o chat.** O plugin fica ligado em toda sessão do Claude Code (por causa dos hooks), mas uma aba comum não puxa mensagem nenhuma.

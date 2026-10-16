@@ -16951,7 +16951,7 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
-var VERSION = "0.3.3";
+var VERSION = "0.3.4";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");
@@ -17104,6 +17104,7 @@ function maskedKey() {
 }
 var AuthError = class extends Error {
 };
+var SHOP_MAX = 6e4;
 async function api(path, { method = "GET", body } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 15e3);
@@ -17134,6 +17135,8 @@ var INSTRUCTIONS = DEGRADED ? [
   "Pedidos que come\xE7am com `usa o <agente>:` s\xE3o atalhos do site: chame esse agente como subagente (ferramenta Agent com subagent_type = <agente>) e responda pelo `reply` quando ele terminar.",
   "Pedido do canal que terminou num relat\xF3rio (resultado de subagente como iron-auditor ou iron-spy, copy longa, plano): chame `deliver` com o t\xEDtulo, o agente e o conte\xFAdo completo ANTES do `reply`, e termine o `reply` com a `url` que o `deliver` devolveu. Resposta curta de conversa n\xE3o vira entrega.",
   "Auditoria ou Spy: o relat\xF3rio do agente termina com um bloco `## Cart\xE3o` (JSON). Passe esse JSON em `card` no `deliver`, sem reescrever. O `reply` final vira 1 ou 2 linhas (nota + frase) e a url; o cart\xE3o aparece sozinho no chat.",
+  "Pedido `usa o iron-auditor:` traz `dono=sim|nao` (o site \xE9 do aluno ou de terceiro): repasse ao auditor como est\xE1.",
+  "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
   'Mensagens com chat_id="system" s\xE3o avisos do pr\xF3prio canal: repasse ao usu\xE1rio no terminal, n\xE3o use `reply` nelas.',
   "S\xF3 a sess\xE3o aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sess\xE3o provavelmente n\xE3o \xE9 o canal: a ferramenta `status` confirma."
 ].join("\n");
@@ -17182,6 +17185,23 @@ var TOOLS = DEGRADED ? [
         }
       },
       required: ["title", "agent", "content"]
+    }
+  },
+  {
+    name: "shop_status",
+    description: "Diz se a loja Shopify do aluno est\xE1 conectada no Iron Office: { connected, shopDomain }. Funciona em qualquer sess\xE3o (n\xE3o s\xF3 no canal). Primeiro passo do agente iron-shopify.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "shop_query",
+    description: "Roda uma query ou mutation GraphQL da Admin API na loja Shopify conectada no Iron Office e devolve o JSON da Shopify. As credenciais ficam no servidor; a chave do Iron Office fica com este plugin. Funciona em qualquer sess\xE3o.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "A query ou mutation GraphQL (Admin API)." },
+        variables: { type: "object", description: "Opcional: vari\xE1veis da query." }
+      },
+      required: ["query"]
     }
   },
   {
@@ -17262,6 +17282,31 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(JSON.stringify({ id, url }));
     } catch (e) {
       return text(`Falhou ao salvar a entrega: ${e.message}`, true);
+    }
+  }
+  if (name === "shop_status") {
+    try {
+      const res = await api("/api/shopify/graphql");
+      if (!res?.connected) return text(`Loja n\xE3o conectada: ${BASE.replace(/^https?:\/\//, "")}/integrations`);
+      return text(JSON.stringify({ connected: true, shopDomain: res.shopDomain ?? null }));
+    } catch (e) {
+      return text(`Falhou ao consultar a loja: ${e.message}`, true);
+    }
+  }
+  if (name === "shop_query") {
+    const query = String(args.query ?? "").trim();
+    if (!query) return text("query \xE9 obrigat\xF3ria.", true);
+    const variables = args.variables && typeof args.variables === "object" && !Array.isArray(args.variables) ? args.variables : void 0;
+    try {
+      const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...variables ? { variables } : {} } });
+      const out = JSON.stringify(res);
+      if (out.length > SHOP_MAX) {
+        return text(`${out.slice(0, SHOP_MAX)}
+[resposta cortada em ${SHOP_MAX / 1e3} kB de ${Math.round(out.length / 1e3)} kB: pe\xE7a menos itens por vez]`);
+      }
+      return text(out);
+    } catch (e) {
+      return text(`Falhou a consulta na loja: ${e.message}`, true);
     }
   }
   return text(`Ferramenta desconhecida: ${name}`, true);

@@ -1,7 +1,8 @@
 // Iron Office — servidor de canal do Claude Code.
 // Puxa as mensagens que o aluno escreveu no dashboard (iron-office.vercel.app/chat),
 // injeta na sessão como notifications/claude/channel, e expõe as ferramentas `reply` (resposta
-// do Iron volta pro site) e `deliver` (salva a entrega em /deliverables e devolve o link).
+// do Iron volta pro site), `deliver` (salva a entrega em /deliverables e devolve o link) e, em
+// qualquer sessao, `shop_status`/`shop_query` (a loja Shopify pelo proxy do site, sem curl no agente).
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -10,7 +11,7 @@ import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 
-const VERSION = "0.3.3";
+const VERSION = "0.3.4";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -204,6 +205,7 @@ function maskedKey() {
 
 // ─── HTTP ───────────────────────────────────────────────────────────────
 class AuthError extends Error {}
+const SHOP_MAX = 60_000; // resposta do shop_query acima disso vai cortada (contexto do modelo)
 
 async function api(path, { method = "GET", body } = {}) {
   const ctrl = new AbortController();
@@ -239,6 +241,8 @@ const INSTRUCTIONS = DEGRADED
       "Pedidos que começam com `usa o <agente>:` são atalhos do site: chame esse agente como subagente (ferramenta Agent com subagent_type = <agente>) e responda pelo `reply` quando ele terminar.",
       "Pedido do canal que terminou num relatório (resultado de subagente como iron-auditor ou iron-spy, copy longa, plano): chame `deliver` com o título, o agente e o conteúdo completo ANTES do `reply`, e termine o `reply` com a `url` que o `deliver` devolveu. Resposta curta de conversa não vira entrega.",
       "Auditoria ou Spy: o relatório do agente termina com um bloco `## Cartão` (JSON). Passe esse JSON em `card` no `deliver`, sem reescrever. O `reply` final vira 1 ou 2 linhas (nota + frase) e a url; o cartão aparece sozinho no chat.",
+      "Pedido `usa o iron-auditor:` traz `dono=sim|nao` (o site é do aluno ou de terceiro): repasse ao auditor como está.",
+      "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
       'Mensagens com chat_id="system" são avisos do próprio canal: repasse ao usuário no terminal, não use `reply` nelas.',
       "Só a sessão aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sessão provavelmente não é o canal: a ferramenta `status` confirma.",
     ].join("\n");
@@ -293,6 +297,25 @@ const TOOLS = DEGRADED
             },
           },
           required: ["title", "agent", "content"],
+        },
+      },
+      {
+        name: "shop_status",
+        description:
+          "Diz se a loja Shopify do aluno está conectada no Iron Office: { connected, shopDomain }. Funciona em qualquer sessão (não só no canal). Primeiro passo do agente iron-shopify.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "shop_query",
+        description:
+          "Roda uma query ou mutation GraphQL da Admin API na loja Shopify conectada no Iron Office e devolve o JSON da Shopify. As credenciais ficam no servidor; a chave do Iron Office fica com este plugin. Funciona em qualquer sessão.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "A query ou mutation GraphQL (Admin API)." },
+            variables: { type: "object", description: "Opcional: variáveis da query." },
+          },
+          required: ["query"],
         },
       },
       {
@@ -383,6 +406,33 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(JSON.stringify({ id, url }));
     } catch (e) {
       return text(`Falhou ao salvar a entrega: ${e.message}`, true);
+    }
+  }
+
+  // loja: em qualquer modo (o aluno usa o iron-shopify num `claude` comum, fora do canal)
+  if (name === "shop_status") {
+    try {
+      const res = await api("/api/shopify/graphql");
+      if (!res?.connected) return text(`Loja não conectada: ${BASE.replace(/^https?:\/\//, "")}/integrations`);
+      return text(JSON.stringify({ connected: true, shopDomain: res.shopDomain ?? null }));
+    } catch (e) {
+      return text(`Falhou ao consultar a loja: ${e.message}`, true);
+    }
+  }
+
+  if (name === "shop_query") {
+    const query = String(args.query ?? "").trim();
+    if (!query) return text("query é obrigatória.", true);
+    const variables = args.variables && typeof args.variables === "object" && !Array.isArray(args.variables) ? args.variables : undefined;
+    try {
+      const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...(variables ? { variables } : {}) } });
+      const out = JSON.stringify(res);
+      if (out.length > SHOP_MAX) {
+        return text(`${out.slice(0, SHOP_MAX)}\n[resposta cortada em ${SHOP_MAX / 1000} kB de ${Math.round(out.length / 1000)} kB: peça menos itens por vez]`);
+      }
+      return text(out);
+    } catch (e) {
+      return text(`Falhou a consulta na loja: ${e.message}`, true);
     }
   }
 
