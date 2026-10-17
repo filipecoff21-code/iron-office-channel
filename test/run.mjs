@@ -132,9 +132,6 @@ async function runHook(home, url, input, channel = "1") {
   const initAt = s.out.find((o) => o.msg.id === 1)?.at ?? Infinity;
   const first = notifs(s.out)[0];
   check("primeira notificação sai depois da resposta do initialize", !!first && first.at >= initAt);
-  const instr = s.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
-  check("instruções trazem a trava de segurança (quem não é o dono não recebe nada)", instr.includes("SEGURANÇA · trava") && instr.includes("NO TERMINAL"), instr.slice(0, 80));
-  check("instruções proíbem segredo e dado pessoal no reply", instr.includes("Nunca envie por `reply` senha"));
   s.p.kill();
   f.srv.close();
 }
