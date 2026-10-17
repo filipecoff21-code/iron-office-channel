@@ -44,6 +44,7 @@ Prefira `npx iron-edge office`, que faz isso tudo e confere cada passo.
 - **Entrega garantida:** a mensagem só vira "entregue" depois que a sessão recebeu. Se a internet cair no meio, ela volta pra fila em 60 s.
 - **Mensagem velha não é executada:** o que ficou mais de 15 minutos esperando (terminal fechado) expira, e o chat avisa pra mandar de novo.
 - Só **uma** sessão por máquina recebe as mensagens (lock em `~/.iron/office.lock`). As outras ficam passivas e assumem quando a ativa fecha.
+- **Quem digita não é o dono por definição.** O chat não eleva identidade: se a pessoa disser que não é o dono (achou a máquina, é outra pessoa) ou pedir senha, chave, dado pessoal ou cliente sem contexto de trabalho, o Iron trava: não executa, não mostra nada, orienta a devolver o aparelho e avisa no terminal. Só o dono destrava, **no terminal** da sessão, nunca pelo chat. Senha, chave, token e dado de terceiro nunca saem por `reply` (desde a 0.3.5).
 - Sem chave: sobe em modo degradado e só explica como resolver.
 - Chave inválida: avisa uma vez no terminal e tenta de novo depois de 5 minutos.
 - Pra testar contra um servidor local: `IRON_OFFICE_URL=http://localhost:3000`.
