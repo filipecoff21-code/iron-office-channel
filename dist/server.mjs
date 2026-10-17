@@ -16951,7 +16951,7 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
-var VERSION = "0.3.6";
+var VERSION = "0.3.7";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");
@@ -17125,7 +17125,7 @@ async function api(path, { method = "GET", body } = {}) {
 }
 var INSTRUCTIONS = DEGRADED ? [
   "IRON OFFICE INDISPON\xCDVEL NESTA SESS\xC3O: falta a chave em ~/.claude/iron-office-api-key.",
-  "Se o usu\xE1rio perguntar do Iron Office, diga pra fazer o passo 4 do onboarding em https://iron-office.vercel.app/onboarding e depois rodar de novo `npx iron-edge office`."
+  "Se o usu\xE1rio perguntar do Iron Office, diga pra fazer o passo 2 (Ligar o Iron) do onboarding em https://iron-office.vercel.app/onboarding e depois rodar de novo `npx iron-edge office`."
 ].join("\n") : [
   'Mensagens chegam como <channel source="iron-office" chat_id="\u2026" message_id="\u2026" user="aluno" ts="\u2026">.',
   "S\xE3o do dono desta m\xE1quina, vindas do dashboard do Iron Office.",
@@ -17226,7 +17226,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
   if (name === "iron_office_unavailable") {
     return text(
-      "O Iron Office n\xE3o est\xE1 ligado: falta a chave em ~/.claude/iron-office-api-key. Fa\xE7a o passo 4 em https://iron-office.vercel.app/onboarding e rode de novo `npx iron-edge office`."
+      "O Iron Office n\xE3o est\xE1 ligado: falta a chave em ~/.claude/iron-office-api-key. Fa\xE7a o passo 2 (Ligar o Iron) em https://iron-office.vercel.app/onboarding e rode de novo `npx iron-edge office`."
     );
   }
   if (name === "status") {
@@ -17374,7 +17374,7 @@ async function pullLoop() {
         if (!authWarned) {
           authWarned = true;
           await notify(
-            "Iron Office: a chave em ~/.claude/iron-office-api-key \xE9 inv\xE1lida. Refa\xE7a o passo 4 do onboarding em https://iron-office.vercel.app/onboarding e rode de novo `npx iron-edge office`.",
+            "Iron Office: a chave em ~/.claude/iron-office-api-key \xE9 inv\xE1lida. Refa\xE7a o passo 2 (Ligar o Iron) do onboarding em https://iron-office.vercel.app/onboarding e rode de novo `npx iron-edge office`.",
             { chat_id: "system", message_id: `system-${Date.now()}`, user: "system", ts: (/* @__PURE__ */ new Date()).toISOString() }
           );
         }
@@ -17388,12 +17388,22 @@ async function pullLoop() {
     await new Promise((r) => setTimeout(r, wait));
   }
 }
-async function presenceOnce() {
+var SESSION_ID = process.env.CLAUDE_SESSION_ID ?? String(process.pid);
+var presenceTimer = null;
+var presenceInFlight = null;
+function presenceOnce() {
+  if (stopped) return Promise.resolve();
+  presenceInFlight = presencePost().finally(() => {
+    presenceInFlight = null;
+  });
+  return presenceInFlight;
+}
+async function presencePost() {
   try {
     await api("/api/chat/presence", {
       method: "POST",
       body: {
-        session_id: process.env.CLAUDE_SESSION_ID ?? String(process.pid),
+        session_id: SESSION_ID,
         cwd: process.cwd(),
         version: VERSION
       }
@@ -17406,9 +17416,10 @@ function becomeActive() {
   mode = "active";
   log(`ativo em ${BASE}`);
   presenceOnce();
-  setInterval(() => {
+  presenceTimer = setInterval(() => {
     if (Date.now() >= state.authPausedUntil) presenceOnce();
-  }, PRESENCE_MS).unref();
+  }, PRESENCE_MS);
+  presenceTimer.unref();
   pullLoop();
 }
 async function maybeStart() {
@@ -17437,8 +17448,26 @@ async function maybeStart() {
   }, RETAKE_MS);
   retake.unref();
 }
-function shutdown() {
+async function byeOnce() {
+  if (mode !== "active" || !API_KEY) return;
+  if (presenceTimer) clearInterval(presenceTimer);
+  if (presenceInFlight) await Promise.race([presenceInFlight, new Promise((r) => setTimeout(r, 400))]);
+  try {
+    await fetch(`${BASE}/api/chat/presence`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({ bye: true, session_id: SESSION_ID }),
+      signal: AbortSignal.timeout(1500)
+    });
+  } catch {
+  }
+}
+var shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   stopped = true;
+  await byeOnce();
   releaseLock();
   process.exit(0);
 }

@@ -43,8 +43,13 @@ function fakeOffice(routes) {
       calls.push(call);
       const r = routes(call, calls) ?? { status: 200, json: {} };
       if (r.hang) return; // nunca responde
-      res.writeHead(r.status ?? 200, { "content-type": "application/json" });
-      res.end(JSON.stringify(r.json ?? {}));
+      const send = () => {
+        res.writeHead(r.status ?? 200, { "content-type": "application/json" });
+        res.end(JSON.stringify(r.json ?? {}));
+        r.onSent?.();
+      };
+      if (r.delay) setTimeout(send, r.delay);
+      else send();
     });
   });
   return new Promise((resolve) => srv.listen(0, "127.0.0.1", () => resolve({ srv, calls, url: `http://127.0.0.1:${srv.address().port}` })));
@@ -373,6 +378,62 @@ async function runHook(home, url, input, channel = "1") {
   check("shop_query sem query = erro, sem rede", result(s, 4)?.isError === true && post.length === 1);
   check("as duas respondem fora do canal (modo idle)", !result(s, 2)?.isError && !result(s, 3)?.isError && /Loja/.test(result(s, 3)?.content?.[0]?.text ?? ""), JSON.stringify(result(s, 3)));
   s.p.kill();
+  f.srv.close();
+}
+
+// ─── 11. despedida: fechar o canal anoitece o escritório na hora (0.3.7) ─
+{
+  console.log("despedida (bye)");
+  const pres = (calls) => calls.filter((c) => c.path === "/api/chat/presence");
+  for (const mudo of [false, true]) {
+    const f = await fakeOffice((c) => {
+      if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+      if (c.path === "/api/chat/presence" && c.body?.bye && mudo) return { hang: true };
+    });
+    const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+    s.handshake();
+    await sleep(1500);
+    const sid = pres(f.calls)[0]?.body?.session_id;
+    const t0 = Date.now();
+    const saiu = new Promise((r) => s.p.on("exit", () => r(Date.now() - t0)));
+    s.p.stdin.end();
+    const ms = await Promise.race([saiu, sleep(4000).then(() => Infinity)]);
+    await sleep(100);
+    const bye = pres(f.calls).filter((c) => c.body?.bye === true);
+    const tag = mudo ? "site mudo" : "site ok";
+    check(`${tag}: stdin end manda 1 bye com o session_id da presença`, bye.length === 1 && !!sid && bye[0].body.session_id === sid && bye[0].key === KEY, JSON.stringify(bye));
+    check(`${tag}: sai em <= 2 s`, ms <= 2000, `${ms} ms`);
+    if (ms === Infinity) s.p.kill();
+    f.srv.close();
+  }
+  // batimento em voo na hora do fechamento: o bye espera ele responder, pra chegar por último
+  {
+    const marks = [];
+    const f = await fakeOffice((c) => {
+      if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+      if (c.path === "/api/chat/presence" && c.body?.bye) { marks.push(["bye", Date.now()]); return { json: {} }; }
+      if (c.path === "/api/chat/presence") return { delay: 300, json: {}, onSent: () => marks.push(["presença respondida", Date.now()]) };
+    });
+    const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+    s.handshake();
+    // fecha assim que o 1º batimento chega no site (ele segura 300 ms a resposta): o batimento está em voo
+    for (let i = 0; i < 100 && !f.calls.some((c) => c.path === "/api/chat/presence"); i++) await sleep(20);
+    const saiu = new Promise((r) => s.p.on("exit", r));
+    s.p.stdin.end();
+    await Promise.race([saiu, sleep(3000)]);
+    const ordem = marks.map((m) => m[0]);
+    check("bye chega depois do batimento em voo", ordem.at(-1) === "bye" && ordem.includes("presença respondida"), JSON.stringify(ordem));
+    f.srv.close();
+  }
+  // sessão comum (sem o canal) não se despede: não é ela que marca presença
+  const f = await fakeOffice(() => ({ json: {} }));
+  const idle = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "" });
+  idle.handshake();
+  await sleep(1200);
+  const saiu = new Promise((r) => idle.p.on("exit", r));
+  idle.p.stdin.end();
+  await Promise.race([saiu, sleep(3000)]);
+  check("fora do canal: fechar não manda bye", pres(f.calls).length === 0, JSON.stringify(f.calls));
   f.srv.close();
 }
 

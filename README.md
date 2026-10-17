@@ -9,7 +9,7 @@ O motor é o seu Claude Code (sua assinatura, seus arquivos). O site é só a ja
 
 ## Instalar e ligar
 
-1. Faça o onboarding do Iron Office até o **passo 4** (gera a chave e salva em `~/.claude/iron-office-api-key`).
+1. Faça o onboarding do Iron Office até o **passo 2 (Ligar o Iron)** (gera a chave e salva em `~/.claude/iron-office-api-key`).
 2. No terminal:
 
    ```bash
@@ -36,7 +36,7 @@ Prefira `npx iron-edge office`, que faz isso tudo e confere cada passo.
 
 | Peça | O que faz |
 |---|---|
-| `dist/server.mjs` | Servidor MCP (canal). Puxa as mensagens do site (`GET /api/chat/pull`, a cada 2 s com o chat aberto, 15 s fechado), injeta na sessão, confirma a entrega (`POST /api/chat/ack`) e expõe as ferramentas `reply` (resposta no chat) e `deliver` (salva a entrega em `POST /api/deliverables`, com o cartão de ação opcional `card` que o chat mostra, e devolve o link `/deliverables?id=`). Marca presença a cada 30 s. |
+| `dist/server.mjs` | Servidor MCP (canal). Puxa as mensagens do site (`GET /api/chat/pull`, a cada 2 s com o chat aberto, 15 s fechado), injeta na sessão, confirma a entrega (`POST /api/chat/ack`) e expõe as ferramentas `reply` (resposta no chat) e `deliver` (salva a entrega em `POST /api/deliverables`, com o cartão de ação opcional `card` que o chat mostra, e devolve o link `/deliverables?id=`). Marca presença a cada 30 s e, ao fechar, avisa o site que o Iron saiu (o escritório anoitece). |
 | ferramentas da loja | `shop_status` (a loja Shopify está conectada? `GET /api/shopify/graphql`) e `shop_query` (query ou mutation GraphQL da Admin API, `POST /api/shopify/graphql`; resposta acima de 60 kB vem cortada). Funcionam em **qualquer** sessão, não só no canal: é por elas que o agente `iron-shopify` fala com a loja, sem ler a chave nem fazer `curl` (desde a 0.3.4). |
 | `hooks/post-event.mjs` | Hooks `PostToolUse`, `SubagentStart`, `SubagentStop` e `Stop` mandam a atividade pro `POST /api/events` (feed e mapa 3D). Só na sessão do canal (`IRON_OFFICE_CHANNEL=1`): `claude` aberto em outra pasta não manda nada. Ferramenta usada dentro de um subagente leva o id e o tipo do agente que a usou. |
 
@@ -57,7 +57,8 @@ Com a chave do Iron Office salva, **toda sessão** do Claude Code manda pro seu 
 - os primeiros 200 caracteres de cada comando de terminal e a descrição curta dele;
 - buscas na web e o **domínio** dos endereços visitados (sem caminho nem parâmetros);
 - o nome e a descrição curta dos agentes acionados;
-- a pasta onde a sessão está rodando e o identificador da sessão.
+- a pasta onde a sessão está rodando e o identificador da sessão;
+- ao fechar, um aviso de que o Iron saiu (o escritório anoitece).
 
 A **resposta** das ferramentas (saída de comando, conteúdo lido, resultado de agente) **nunca sai**.
 

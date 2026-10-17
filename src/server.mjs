@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 
-const VERSION = "0.3.6";
+const VERSION = "0.3.7";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -230,7 +230,7 @@ async function api(path, { method = "GET", body } = {}) {
 const INSTRUCTIONS = DEGRADED
   ? [
       "IRON OFFICE INDISPONÍVEL NESTA SESSÃO: falta a chave em ~/.claude/iron-office-api-key.",
-      "Se o usuário perguntar do Iron Office, diga pra fazer o passo 4 do onboarding em https://iron-office.vercel.app/onboarding e depois rodar de novo `npx iron-edge office`.",
+      "Se o usuário perguntar do Iron Office, diga pra fazer o passo 2 (Ligar o Iron) do onboarding em https://iron-office.vercel.app/onboarding e depois rodar de novo `npx iron-edge office`.",
     ].join("\n")
   : [
       'Mensagens chegam como <channel source="iron-office" chat_id="…" message_id="…" user="aluno" ts="…">.',
@@ -346,7 +346,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "iron_office_unavailable") {
     return text(
       "O Iron Office não está ligado: falta a chave em ~/.claude/iron-office-api-key. " +
-        "Faça o passo 4 em https://iron-office.vercel.app/onboarding e rode de novo `npx iron-edge office`.",
+        "Faça o passo 2 (Ligar o Iron) em https://iron-office.vercel.app/onboarding e rode de novo `npx iron-edge office`.",
     );
   }
 
@@ -510,7 +510,7 @@ async function pullLoop() {
         if (!authWarned) {
           authWarned = true;
           await notify(
-            "Iron Office: a chave em ~/.claude/iron-office-api-key é inválida. Refaça o passo 4 do onboarding em https://iron-office.vercel.app/onboarding e rode de novo `npx iron-edge office`.",
+            "Iron Office: a chave em ~/.claude/iron-office-api-key é inválida. Refaça o passo 2 (Ligar o Iron) do onboarding em https://iron-office.vercel.app/onboarding e rode de novo `npx iron-edge office`.",
             { chat_id: "system", message_id: `system-${Date.now()}`, user: "system", ts: new Date().toISOString() },
           );
         }
@@ -525,12 +525,22 @@ async function pullLoop() {
   }
 }
 
-async function presenceOnce() {
+const SESSION_ID = process.env.CLAUDE_SESSION_ID ?? String(process.pid);
+let presenceTimer = null;
+let presenceInFlight = null; // batimento em voo: o bye espera ele, senão chega depois e religa a sessão
+
+function presenceOnce() {
+  if (stopped) return Promise.resolve();
+  presenceInFlight = presencePost().finally(() => { presenceInFlight = null; });
+  return presenceInFlight;
+}
+
+async function presencePost() {
   try {
     await api("/api/chat/presence", {
       method: "POST",
       body: {
-        session_id: process.env.CLAUDE_SESSION_ID ?? String(process.pid),
+        session_id: SESSION_ID,
         cwd: process.cwd(),
         version: VERSION,
       },
@@ -544,9 +554,10 @@ function becomeActive() {
   mode = "active";
   log(`ativo em ${BASE}`);
   presenceOnce();
-  setInterval(() => {
+  presenceTimer = setInterval(() => {
     if (Date.now() >= state.authPausedUntil) presenceOnce();
-  }, PRESENCE_MS).unref();
+  }, PRESENCE_MS);
+  presenceTimer.unref();
   pullLoop();
 }
 
@@ -579,9 +590,33 @@ async function maybeStart() {
   retake.unref();
 }
 
+// Despedida (0.3.7): a sessão ativa avisa o site que fechou e o escritório anoitece na hora
+// (sem isso a noite só cai 60 s depois do último batimento). Site mudo não segura o fechamento:
+// 1,5 s e desiste. O banco só aceita o bye da sessão registrada (uma velha não apaga a nova).
+async function byeOnce() {
+  if (mode !== "active" || !API_KEY) return;
+  if (presenceTimer) clearInterval(presenceTimer);
+  // batimento que já saiu: espera até 400 ms (o fechamento todo cabe em 2 s), pro bye chegar por último
+  if (presenceInFlight) await Promise.race([presenceInFlight, new Promise((r) => setTimeout(r, 400))]);
+  try {
+    await fetch(`${BASE}/api/chat/presence`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({ bye: true, session_id: SESSION_ID }),
+      signal: AbortSignal.timeout(1500),
+    });
+  } catch {
+    // site fora ou lento: a noite cai pelo batimento, como antes
+  }
+}
+
 // ─── Boot ───────────────────────────────────────────────────────────────
-function shutdown() {
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   stopped = true;
+  await byeOnce();
   releaseLock();
   process.exit(0);
 }
