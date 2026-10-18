@@ -16952,7 +16952,7 @@ import { homedir } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-var VERSION = "0.3.8";
+var VERSION = "0.3.9";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");

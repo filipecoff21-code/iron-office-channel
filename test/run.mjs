@@ -90,9 +90,9 @@ function startServer(home, url, env = {}) {
 
 const notifs = (out) => out.filter((o) => o.msg.method === "notifications/claude/channel");
 
-async function runHook(home, url, input, channel = "1") {
+async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   return new Promise((resolve) => {
-    const p = spawn(process.execPath, [HOOK], {
+    const p = spawn(process.execPath, [hookPath], {
       env: { ...process.env, HOME: home, USERPROFILE: home, IRON_OFFICE_URL: url, IRON_OFFICE_CHANNEL: channel },
       stdio: ["pipe", "ignore", "ignore"],
     });
@@ -274,6 +274,20 @@ async function runHook(home, url, input, channel = "1") {
   check("corte não parte emoji ao meio", !!emoji && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(emoji.body.tool_input.command));
   check("stdin vazio sai 0", code === 0);
   check("sem chave não envia nada", f.calls.length === antesSemChave);
+  f.srv.close();
+}
+
+// ─── 7b. hook sem plugin.json vai sem versão (0.3.9) ────────────────────
+{
+  console.log("hook sem plugin.json");
+  const f = await fakeOffice(() => ({ json: {} }));
+  const home = casa();
+  const dir = mkdtempSync(join(tmpdir(), "iron-office-sem-manifesto-"));
+  mkdirSync(join(dir, "hooks"));
+  writeFileSync(join(dir, "hooks", "post-event.mjs"), readFileSync(HOOK));
+  await runHook(home, f.url, { session_id: "s", cwd: "/tmp", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "ls" } }, "1", join(dir, "hooks", "post-event.mjs"));
+  check("evento sai, mas sem hook_version (nada de versão fixa no código)", f.calls.length === 1 && !("hook_version" in (f.calls[0].body ?? {})), JSON.stringify(f.calls.map((c) => c.body?.hook_version)));
+  rmSync(dir, { recursive: true, force: true });
   f.srv.close();
 }
 

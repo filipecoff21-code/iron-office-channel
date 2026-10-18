@@ -20,12 +20,14 @@ const NOISE = new Set(["Read", "Grep", "Glob"]);
 
 // Versão do hook (0.3.8+): o site só grava evento que traz versão. Sessão aberta antes do update roda
 // o hook velho, que não manda, e por isso some do feed sem precisar fechar a aba.
+// 0.3.9: sem plugin.json legível, vai sem versão (undefined some do JSON) e o site responde 204:
+// um hook que não sabe quem é não finge ser a versão atual.
 function hookVersion() {
   try {
     const here = dirname(fileURLToPath(import.meta.url));
-    return JSON.parse(readFileSync(join(here, "..", ".claude-plugin", "plugin.json"), "utf8")).version || "0.3.8";
+    return JSON.parse(readFileSync(join(here, "..", ".claude-plugin", "plugin.json"), "utf8")).version || undefined;
   } catch {
-    return "0.3.8";
+    return undefined;
   }
 }
 

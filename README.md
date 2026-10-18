@@ -48,9 +48,15 @@ Prefira `npx iron-edge office`, que faz isso tudo e confere cada passo.
 - Chave inválida: avisa uma vez no terminal e tenta de novo depois de 5 minutos.
 - Pra testar contra um servidor local: `IRON_OFFICE_URL=http://localhost:3000`.
 
+## Fechar o canal
+
+Ctrl+C duas vezes ou `/exit`: o escritório anoitece em 1 a 2 segundos. Fechar a janela do Terminal também anoitece na hora.
+
+No **Warp**, fechar a aba pelo X demora cerca de 1 minuto: o Warp guarda a aba fechada pra poder reabrir, e nesse tempo o canal ainda está vivo. Feche com Ctrl+C antes do X, ou desligue a reabertura de abas fechadas nas configurações do Warp.
+
 ## O que sai da sua máquina
 
-Com a chave do Iron Office salva, **toda sessão** do Claude Code manda pro seu painel (visível só pra você):
+Com a chave do Iron Office salva, **só a sessão aberta pelo `npx iron-edge office`** (ou `ironoffice`) manda pro seu painel (visível só pra você); uma aba comum do Claude Code não manda nada (plugin 0.3.1 em diante, e o hook anterior é ignorado pelo site desde a 0.3.8):
 
 - o nome de cada ferramenta usada (menos `Read`, `Grep` e `Glob`);
 - o **caminho** dos arquivos criados ou editados (nunca o conteúdo);
