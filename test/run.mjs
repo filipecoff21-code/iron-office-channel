@@ -267,6 +267,9 @@ async function runHook(home, url, input, channel = "1") {
   check("WebFetch manda só o domínio", fetch?.body?.tool_input?.url === "https://hooks.exemplo.com" && !sent.includes("segredoNoCaminho"), JSON.stringify(fetch?.body?.tool_input));
   check("SubagentStop sem agente não vira evento", !f.calls.some((c) => c.body?.tool_name === "SubagentStop"));
   check("SubagentStart leva o nome do agente", f.calls.some((c) => c.body?.tool_input?.agent_type === "iron-research"));
+  // 0.3.8: todo evento leva a versão do hook (a do plugin.json); o site recusa evento sem ela
+  const ver = JSON.parse(readFileSync(join(ROOT, ".claude-plugin", "plugin.json"), "utf8")).version;
+  check("todo evento leva hook_version = versão do plugin.json", f.calls.length > 0 && f.calls.every((c) => c.body?.hook_version === ver), JSON.stringify(f.calls.map((c) => c.body?.hook_version)));
   const emoji = f.calls.find((c) => (c.body?.tool_input?.command ?? "").startsWith("🎉"));
   check("corte não parte emoji ao meio", !!emoji && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(emoji.body.tool_input.command));
   check("stdin vazio sai 0", code === 0);
@@ -398,7 +401,8 @@ async function runHook(home, url, input, channel = "1") {
     const saiu = new Promise((r) => s.p.on("exit", () => r(Date.now() - t0)));
     s.p.stdin.end();
     const ms = await Promise.race([saiu, sleep(4000).then(() => Infinity)]);
-    await sleep(100);
+    // 0.3.8: o POST sai do filho solto (bye.mjs), que leva uns 100-300 ms pra subir o node
+    for (let i = 0; i < 150 && !pres(f.calls).some((c) => c.body?.bye === true); i++) await sleep(20);
     const bye = pres(f.calls).filter((c) => c.body?.bye === true);
     const tag = mudo ? "site mudo" : "site ok";
     check(`${tag}: stdin end manda 1 bye com o session_id da presença`, bye.length === 1 && !!sid && bye[0].body.session_id === sid && bye[0].key === KEY, JSON.stringify(bye));
@@ -421,6 +425,7 @@ async function runHook(home, url, input, channel = "1") {
     const saiu = new Promise((r) => s.p.on("exit", r));
     s.p.stdin.end();
     await Promise.race([saiu, sleep(3000)]);
+    for (let i = 0; i < 150 && !marks.some((m) => m[0] === "bye"); i++) await sleep(20);
     const ordem = marks.map((m) => m[0]);
     check("bye chega depois do batimento em voo", ordem.at(-1) === "bye" && ordem.includes("presença respondida"), JSON.stringify(ordem));
     f.srv.close();
@@ -433,8 +438,93 @@ async function runHook(home, url, input, channel = "1") {
   const saiu = new Promise((r) => idle.p.on("exit", r));
   idle.p.stdin.end();
   await Promise.race([saiu, sleep(3000)]);
+  await sleep(1500); // tempo de um filho solto, se tivesse sido criado, chegar
   check("fora do canal: fechar não manda bye", pres(f.calls).length === 0, JSON.stringify(f.calls));
   f.srv.close();
+}
+
+// ─── 12. despedida solta (0.3.8): sobrevive ao fechar a janela ─────────
+{
+  console.log("despedida solta (bye.mjs)");
+  const BYE = join(ROOT, "dist", "bye.mjs");
+  const pres = (calls) => calls.filter((c) => c.path === "/api/chat/presence");
+  // (a) o fechamento cria o filho com o bye.mjs; a chave não vai no argv (o `ps` mostraria)
+  {
+    const f = await fakeOffice((c) => (c.path === "/api/chat/pull" ? { json: { dashboard_open: true, messages: [] } } : { json: {} }));
+    const home = casa();
+    const spy = join(home, "bye-spy.jsonl");
+    const s = startServer(home, f.url, { IRON_OFFICE_CHANNEL: "1", IRON_OFFICE_BYE_SPY: spy, NODE_ENV: "test" });
+    s.handshake();
+    await sleep(1500);
+    const saiu = new Promise((r) => s.p.on("exit", r));
+    s.p.stdin.end();
+    await Promise.race([saiu, sleep(3000)]);
+    let linhas = [];
+    for (let i = 0; i < 150 && !linhas.length; i++) { await sleep(20); try { linhas = readFileSync(spy, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { /* ainda não */ } }
+    const sid = pres(f.calls)[0]?.body?.session_id;
+    check("fechar cria 1 filho bye.mjs com o session_id da presença", linhas.length === 1 && linhas[0].session_id === sid && linhas[0].base === f.url && linhas[0].has_key === true, JSON.stringify(linhas));
+    check("a chave não vai no argv do filho", Array.isArray(linhas[0]?.argv) && linhas[0].argv.length === 3 && !linhas[0].argv.join(" ").includes("iok_"), JSON.stringify(linhas[0]?.argv));
+    f.srv.close();
+  }
+  // (b) fechar a janela = o grupo inteiro morre logo depois do SIGHUP. Com um batimento em voo (o site
+  // segura a resposta), a 0.3.7 ficava esperando ele dentro do processo e morria sem despedir; o filho
+  // solto nasce na hora, espera do lado de fora e despede (controle negativo: falha na 0.3.7).
+  if (process.platform !== "win32") {
+    const f = await fakeOffice((c) => {
+      if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+      if (c.path === "/api/chat/presence" && !c.body?.bye) return { delay: 1500, json: {} };
+      return { json: {} };
+    });
+    const p = spawn(process.execPath, [SERVER], {
+      env: { ...process.env, HOME: casa(), IRON_OFFICE_URL: f.url, IRON_OFFICE_CHANNEL: "1" },
+      stdio: ["pipe", "ignore", "ignore"],
+      detached: true, // grupo próprio, como a aba do terminal
+    });
+    p.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } }) + "\n");
+    p.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+    // espera o 1º batimento chegar no site (ele fica em voo por 1,5 s)
+    for (let i = 0; i < 150 && !pres(f.calls).length; i++) await sleep(20);
+    const t0 = Date.now();
+    // fechar a janela: o terminal manda SIGHUP ao grupo e, logo depois, quem sobrou morre de vez
+    process.kill(-p.pid, "SIGHUP");
+    await sleep(60);
+    try { process.kill(-p.pid, "SIGKILL"); } catch { /* o grupo já tinha saído */ }
+    for (let i = 0; i < 150 && !pres(f.calls).some((c) => c.body?.bye === true); i++) await sleep(20);
+    const ms = Date.now() - t0;
+    check("SIGHUP + SIGKILL no grupo com batimento em voo: o bye chega em <= 3 s", pres(f.calls).some((c) => c.body?.bye === true) && ms <= 3000, `${ms} ms`);
+    try { process.kill(-p.pid, "SIGKILL"); } catch { /* já saiu */ }
+    f.srv.close();
+  }
+  // (d) sem o bye.mjs ao lado (instalação pela metade): despede do próprio processo, como na 0.3.7
+  {
+    const f = await fakeOffice((c) => (c.path === "/api/chat/pull" ? { json: { dashboard_open: true, messages: [] } } : { json: {} }));
+    const dir = mkdtempSync(join(tmpdir(), "iron-office-sem-bye-"));
+    lixo.push(dir);
+    writeFileSync(join(dir, "server.mjs"), readFileSync(SERVER));
+    const p = spawn(process.execPath, [join(dir, "server.mjs")], { env: { ...process.env, HOME: casa(), IRON_OFFICE_URL: f.url, IRON_OFFICE_CHANNEL: "1" }, stdio: ["pipe", "ignore", "pipe"] });
+    let err = ""; p.stderr.on("data", (c) => (err += c));
+    p.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } }) + "\n");
+    p.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+    await sleep(1500);
+    const saiu = new Promise((r) => p.on("exit", r));
+    p.stdin.end();
+    await Promise.race([saiu, sleep(3000)]);
+    check("sem bye.mjs: despede do próprio processo e avisa no log", pres(f.calls).some((c) => c.body?.bye === true) && /bye\.mjs ausente/.test(err), err.slice(-200));
+    f.srv.close();
+  }
+  // (c) bye.mjs sozinho: 1 POST com bye; com o site mudo sai em <= 3 s, código 0
+  for (const mudo of [false, true]) {
+    const f = await fakeOffice((c) => (mudo ? { hang: true } : { json: {} }));
+    const t0 = Date.now();
+    const code = await new Promise((r) => {
+      const c = spawn(process.execPath, [BYE, f.url, "sessao-x"], { env: { ...process.env, HOME: casa() }, stdio: "ignore" });
+      c.on("exit", r);
+    });
+    const ms = Date.now() - t0;
+    const posts = pres(f.calls);
+    check(`bye.mjs ${mudo ? "site mudo" : "site ok"}: 1 POST bye e sai 0 em <= 3 s`, code === 0 && ms <= 3000 && posts.length === 1 && posts[0].body.bye === true && posts[0].body.session_id === "sessao-x" && posts[0].key === KEY, `${code} ${ms} ms ${JSON.stringify(posts)}`);
+    f.srv.close();
+  }
 }
 
 for (const d of lixo) {

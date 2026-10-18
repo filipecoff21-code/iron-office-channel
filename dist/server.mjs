@@ -16947,11 +16947,12 @@ var StdioServerTransport = class {
 };
 
 // src/server.mjs
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { execFile } from "node:child_process";
-import { join } from "node:path";
-var VERSION = "0.3.7";
+import { execFile, spawn } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+var VERSION = "0.3.8";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");
@@ -17448,10 +17449,24 @@ async function maybeStart() {
   }, RETAKE_MS);
   retake.unref();
 }
+var BYE_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "bye.mjs");
 async function byeOnce() {
   if (mode !== "active" || !API_KEY) return;
   if (presenceTimer) clearInterval(presenceTimer);
-  if (presenceInFlight) await Promise.race([presenceInFlight, new Promise((r) => setTimeout(r, 400))]);
+  const waitMs = presenceInFlight ? 400 : 0;
+  if (existsSync(BYE_SCRIPT)) {
+    try {
+      const child = spawn(process.execPath, [BYE_SCRIPT, BASE, SESSION_ID, String(waitMs)], { detached: true, stdio: "ignore", windowsHide: true });
+      child.on("error", (e) => log(`despedida n\xE3o saiu: ${e.message}`));
+      child.unref();
+      return;
+    } catch (e) {
+      log(`despedida solta falhou (${e.message}); mandando daqui`);
+    }
+  } else {
+    log("bye.mjs ausente: despedida sai daqui (n\xE3o sobrevive ao fechar a janela)");
+  }
+  if (presenceInFlight) await Promise.race([presenceInFlight, new Promise((r) => setTimeout(r, waitMs))]);
   try {
     await fetch(`${BASE}/api/chat/presence`, {
       method: "POST",

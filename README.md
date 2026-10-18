@@ -36,7 +36,7 @@ Prefira `npx iron-edge office`, que faz isso tudo e confere cada passo.
 
 | Peça | O que faz |
 |---|---|
-| `dist/server.mjs` | Servidor MCP (canal). Puxa as mensagens do site (`GET /api/chat/pull`, a cada 2 s com o chat aberto, 15 s fechado), injeta na sessão, confirma a entrega (`POST /api/chat/ack`) e expõe as ferramentas `reply` (resposta no chat) e `deliver` (salva a entrega em `POST /api/deliverables`, com o cartão de ação opcional `card` que o chat mostra, e devolve o link `/deliverables?id=`). Marca presença a cada 30 s e, ao fechar, avisa o site que o Iron saiu (o escritório anoitece). |
+| `dist/server.mjs` | Servidor MCP (canal). Puxa as mensagens do site (`GET /api/chat/pull`, a cada 2 s com o chat aberto, 15 s fechado), injeta na sessão, confirma a entrega (`POST /api/chat/ack`) e expõe as ferramentas `reply` (resposta no chat) e `deliver` (salva a entrega em `POST /api/deliverables`, com o cartão de ação opcional `card` que o chat mostra, e devolve o link `/deliverables?id=`). Marca presença a cada 30 s e, ao fechar (inclusive fechando a janela do terminal), avisa o site que o Iron saiu (o escritório anoitece). |
 | ferramentas da loja | `shop_status` (a loja Shopify está conectada? `GET /api/shopify/graphql`) e `shop_query` (query ou mutation GraphQL da Admin API, `POST /api/shopify/graphql`; resposta acima de 60 kB vem cortada). Funcionam em **qualquer** sessão, não só no canal: é por elas que o agente `iron-shopify` fala com a loja, sem ler a chave nem fazer `curl` (desde a 0.3.4). |
 | `hooks/post-event.mjs` | Hooks `PostToolUse`, `SubagentStart`, `SubagentStop` e `Stop` mandam a atividade pro `POST /api/events` (feed e mapa 3D). Só na sessão do canal (`IRON_OFFICE_CHANNEL=1`): `claude` aberto em outra pasta não manda nada. Ferramenta usada dentro de um subagente leva o id e o tipo do agente que a usou. |
 
@@ -61,6 +61,8 @@ Com a chave do Iron Office salva, **toda sessão** do Claude Code manda pro seu 
 - ao fechar, um aviso de que o Iron saiu (o escritório anoitece).
 
 A **resposta** das ferramentas (saída de comando, conteúdo lido, resultado de agente) **nunca sai**.
+
+O feed só aceita o hook desta versão em diante. Sessão do Claude aberta antes de atualizar o plugin não manda mais nada: feche e abra o canal de novo (`ironoffice`) pra voltar a ver a atividade.
 
 Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair: chaves de Stripe, Shopify, Meta, GitHub, OpenAI/Anthropic, Supabase e AWS, JWT, `Bearer`, `ALGO_KEY=valor`, `"password": "…"`, `--password X`, `--token=X`, `-pSENHA` e `-u usuario:senha`. É uma lista de padrões, não uma garantia: um segredo num formato que ela não conhece passa.
 

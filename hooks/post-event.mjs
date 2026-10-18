@@ -12,10 +12,22 @@
 // não saem (ruído).
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const NOISE = new Set(["Read", "Grep", "Glob"]);
+
+// Versão do hook (0.3.8+): o site só grava evento que traz versão. Sessão aberta antes do update roda
+// o hook velho, que não manda, e por isso some do feed sem precisar fechar a aba.
+function hookVersion() {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(readFileSync(join(here, "..", ".claude-plugin", "plugin.json"), "utf8")).version || "0.3.8";
+  } catch {
+    return "0.3.8";
+  }
+}
 
 function readKey() {
   try {
@@ -152,6 +164,7 @@ async function main() {
     cwd: typeof hook.cwd === "string" ? hook.cwd : process.cwd(),
     session_id: typeof hook.session_id === "string" ? hook.session_id : null,
     hook_event_name: event,
+    hook_version: hookVersion(),
   };
 
   const ctrl = new AbortController();

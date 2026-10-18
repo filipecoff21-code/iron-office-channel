@@ -6,12 +6,13 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { execFile } from "node:child_process";
-import { join } from "node:path";
+import { execFile, spawn } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const VERSION = "0.3.7";
+const VERSION = "0.3.8";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -590,14 +591,33 @@ async function maybeStart() {
   retake.unref();
 }
 
-// Despedida (0.3.7): a sessão ativa avisa o site que fechou e o escritório anoitece na hora
-// (sem isso a noite só cai 60 s depois do último batimento). Site mudo não segura o fechamento:
-// 1,5 s e desiste. O banco só aceita o bye da sessão registrada (uma velha não apaga a nova).
+// Despedida: a sessão ativa avisa o site que fechou e o escritório anoitece na hora (sem isso a
+// noite só cai 60 s depois do último batimento). O banco só aceita o bye da sessão registrada (uma
+// velha não apaga a nova).
+// 0.3.8: o POST sai de um processo filho SOLTO (detached, bye.mjs). Fechar a janela do terminal mata
+// o grupo de processos inteiro, este servidor no meio do fetch; o filho fica fora do grupo e termina.
+// A chave não vai por argumento (o `ps` mostraria): o bye.mjs lê do arquivo.
+// O filho nasce NA HORA (o grupo pode morrer a qualquer momento depois do sinal) e é ele que espera o
+// batimento em voo (até 400 ms), pro bye chegar por último. Sem o bye.mjs ao lado (instalação pela
+// metade), cai no POST aqui mesmo, como na 0.3.7.
+const BYE_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "bye.mjs");
 async function byeOnce() {
   if (mode !== "active" || !API_KEY) return;
   if (presenceTimer) clearInterval(presenceTimer);
-  // batimento que já saiu: espera até 400 ms (o fechamento todo cabe em 2 s), pro bye chegar por último
-  if (presenceInFlight) await Promise.race([presenceInFlight, new Promise((r) => setTimeout(r, 400))]);
+  const waitMs = presenceInFlight ? 400 : 0;
+  if (existsSync(BYE_SCRIPT)) {
+    try {
+      const child = spawn(process.execPath, [BYE_SCRIPT, BASE, SESSION_ID, String(waitMs)], { detached: true, stdio: "ignore", windowsHide: true });
+      child.on("error", (e) => log(`despedida não saiu: ${e.message}`));
+      child.unref();
+      return;
+    } catch (e) {
+      log(`despedida solta falhou (${e.message}); mandando daqui`);
+    }
+  } else {
+    log("bye.mjs ausente: despedida sai daqui (não sobrevive ao fechar a janela)");
+  }
+  if (presenceInFlight) await Promise.race([presenceInFlight, new Promise((r) => setTimeout(r, waitMs))]);
   try {
     await fetch(`${BASE}/api/chat/presence`, {
       method: "POST",
@@ -606,7 +626,7 @@ async function byeOnce() {
       signal: AbortSignal.timeout(1500),
     });
   } catch {
-    // site fora ou lento: a noite cai pelo batimento, como antes
+    // site fora ou lento: a noite cai pelo batimento
   }
 }
 
