@@ -17400,23 +17400,42 @@ function presenceOnce() {
   return presenceInFlight;
 }
 var MAX_MCP = 50;
+var MCP_PRIORITY = ["meta-ads"];
 function mcpKeys(obj) {
   const m = obj && typeof obj === "object" ? obj.mcpServers : null;
   return m && typeof m === "object" && !Array.isArray(m) ? Object.keys(m) : [];
 }
+function strList(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
 function readJson(path) {
+  let text2;
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    text2 = readFileSync(path, "utf8");
   } catch {
     return null;
+  }
+  try {
+    return JSON.parse(text2);
+  } catch {
+    return void 0;
   }
 }
 function mcpServerNames(home = homedir(), cwd = process.cwd()) {
   const user = readJson(join(home, ".claude.json"));
-  const names = [...mcpKeys(user), ...mcpKeys(user?.projects?.[cwd]), ...mcpKeys(readJson(join(cwd, ".mcp.json")))];
-  return [...new Set(names)].filter((n) => n.length > 0 && n.length <= 64).slice(0, MAX_MCP);
+  if (user === void 0) return null;
+  const proj = user?.projects && typeof user.projects === "object" ? user.projects[cwd] : null;
+  const p = proj && typeof proj === "object" ? proj : {};
+  const offJson = new Set(strList(p.disabledMcpjsonServers));
+  const onJson = new Set(strList(p.enabledMcpjsonServers));
+  const fromJson = mcpKeys(readJson(join(cwd, ".mcp.json"))).filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
+  const off = new Set(strList(p.disabledMcpServers));
+  const names = [.../* @__PURE__ */ new Set([...mcpKeys(user), ...mcpKeys(p), ...fromJson])].map((n) => n.trim()).filter((n) => n.length > 0 && n.length <= 64 && !off.has(n));
+  names.sort((x, y) => Number(MCP_PRIORITY.includes(y)) - Number(MCP_PRIORITY.includes(x)));
+  return names.slice(0, MAX_MCP);
 }
 async function presencePost() {
+  const mcp2 = mcpServerNames();
   try {
     await api("/api/chat/presence", {
       method: "POST",
@@ -17424,7 +17443,7 @@ async function presencePost() {
         session_id: SESSION_ID,
         cwd: process.cwd(),
         version: VERSION,
-        mcp_servers: mcpServerNames()
+        ...mcp2 === null ? {} : { mcp_servers: mcp2 }
       }
     });
   } catch (e) {

@@ -536,28 +536,52 @@ function presenceOnce() {
   return presenceInFlight;
 }
 
-// 0.4.0: nomes dos servidores MCP configurados (o site mostra Meta Ads "conectado" quando vem meta-ads).
+// 0.4.0: nomes dos servidores MCP configurados (o site mostra Meta Ads "instalado" quando vem meta-ads).
 // Só as CHAVES de mcpServers, nunca os valores (lá podem morar tokens). Lê o escopo do usuário e o local
-// da pasta (~/.claude.json) e o .mcp.json do projeto. Arquivo ausente ou quebrado conta como nada.
+// da pasta (~/.claude.json) e o .mcp.json do projeto só se o aluno aprovou. Desligado no /mcp não conta.
+// Arquivo ausente conta como nada; quebrado (lido no meio de uma escrita) devolve null e a presença sai
+// sem o campo, pro site manter a lista anterior em vez de apagar.
 const MAX_MCP = 50;
+const MCP_PRIORITY = ["meta-ads"]; // o que o site mede entra antes do corte de 50
 function mcpKeys(obj) {
   const m = obj && typeof obj === "object" ? obj.mcpServers : null;
   return m && typeof m === "object" && !Array.isArray(m) ? Object.keys(m) : [];
 }
+function strList(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
 function readJson(path) {
+  let text;
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    text = readFileSync(path, "utf8");
   } catch {
-    return null;
+    return null; // não existe (ou sem permissão): nada configurado ali
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined; // existe mas está quebrado
   }
 }
 function mcpServerNames(home = homedir(), cwd = process.cwd()) {
   const user = readJson(join(home, ".claude.json"));
-  const names = [...mcpKeys(user), ...mcpKeys(user?.projects?.[cwd]), ...mcpKeys(readJson(join(cwd, ".mcp.json")))];
-  return [...new Set(names)].filter((n) => n.length > 0 && n.length <= 64).slice(0, MAX_MCP);
+  if (user === undefined) return null;
+  const proj = user?.projects && typeof user.projects === "object" ? user.projects[cwd] : null;
+  const p = proj && typeof proj === "object" ? proj : {};
+  const offJson = new Set(strList(p.disabledMcpjsonServers));
+  const onJson = new Set(strList(p.enabledMcpjsonServers));
+  const fromJson = mcpKeys(readJson(join(cwd, ".mcp.json")))
+    .filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
+  const off = new Set(strList(p.disabledMcpServers));
+  const names = [...new Set([...mcpKeys(user), ...mcpKeys(p), ...fromJson])]
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0 && n.length <= 64 && !off.has(n));
+  names.sort((x, y) => Number(MCP_PRIORITY.includes(y)) - Number(MCP_PRIORITY.includes(x)));
+  return names.slice(0, MAX_MCP);
 }
 
 async function presencePost() {
+  const mcp = mcpServerNames();
   try {
     await api("/api/chat/presence", {
       method: "POST",
@@ -565,7 +589,7 @@ async function presencePost() {
         session_id: SESSION_ID,
         cwd: process.cwd(),
         version: VERSION,
-        mcp_servers: mcpServerNames(),
+        ...(mcp === null ? {} : { mcp_servers: mcp }),
       },
     });
   } catch (e) {

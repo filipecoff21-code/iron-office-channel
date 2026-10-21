@@ -4,7 +4,7 @@
 // sessão comum não puxa, lock atômico com reassunção, e o hook não vaza segredo.
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -570,7 +570,22 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const quebrado = casa();
   writeFileSync(join(quebrado, ".claude.json"), "{ isso não é json");
   const b3 = await rodar(quebrado);
-  check("~/.claude.json quebrado: lista vazia, presença sai igual", Array.isArray(b3?.mcp_servers) && b3.mcp_servers.length === 0, JSON.stringify(b3));
+  check("~/.claude.json quebrado: presença sai sem o campo (o site mantém a lista anterior)", !!b3 && !("mcp_servers" in b3) && !!b3.session_id, JSON.stringify(b3));
+  // escopo local da pasta (o cwd do processo é o caminho físico: /private/var no macOS)
+  const local = casa();
+  const cwdReal = realpathSync(local);
+  writeFileSync(join(local, ".claude.json"), JSON.stringify({
+    projects: { [cwdReal]: { mcpServers: { "meta-ads": {}, desligado: {} }, disabledMcpServers: ["desligado"], enabledMcpjsonServers: ["aprovado"] } },
+  }));
+  writeFileSync(join(local, ".mcp.json"), JSON.stringify({ mcpServers: { aprovado: {}, "nao-aprovado": {} } }));
+  const b4 = await rodar(local);
+  check("escopo local da pasta entra; desligado no /mcp e .mcp.json não aprovado ficam fora", JSON.stringify(b4?.mcp_servers) === JSON.stringify(["meta-ads", "aprovado"]), JSON.stringify(b4));
+  // 80 servidores com meta-ads no fim: ele entra antes do corte de 50
+  const cheio = casa();
+  const muitos = Object.fromEntries([...Array.from({ length: 80 }, (_, i) => [`k${i}`, {}]), ["meta-ads", {}]]);
+  writeFileSync(join(cheio, ".claude.json"), JSON.stringify({ mcpServers: muitos }));
+  const b5 = await rodar(cheio);
+  check("mais de 50: corta em 50 e meta-ads vem primeiro", b5?.mcp_servers?.length === 50 && b5.mcp_servers[0] === "meta-ads", JSON.stringify(b5?.mcp_servers?.slice(0, 3)));
 }
 
 for (const d of lixo) {
