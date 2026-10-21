@@ -1,8 +1,8 @@
 {
   "name": "iron-office-channel",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
-  "description": "Canal do Claude Code que liga o dashboard do Iron Office (iron-office.vercel.app) à sessão local do aluno.",
+  "description": "Canal do Claude Code que liga o dashboard do Iron Office (ironoffice.app) à sessão local do aluno.",
   "type": "module",
   "scripts": {
     "build": "esbuild src/server.mjs --bundle --platform=node --format=esm --target=node18 --outfile=dist/server.mjs --banner:js=\"import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);\" && esbuild src/bye.mjs --platform=node --format=esm --target=node18 --outfile=dist/bye.mjs",

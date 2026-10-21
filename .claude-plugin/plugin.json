@@ -1,10 +1,10 @@
 {
   "name": "iron-office",
   "displayName": "Iron Office",
-  "description": "Canal do Iron Office: conversa com o Iron pelo dashboard (iron-office.vercel.app) e mostra os agentes trabalhando no feed e no mapa 3D.",
-  "version": "0.5.1",
+  "description": "Canal do Iron Office: conversa com o Iron pelo dashboard (ironoffice.app) e mostra os agentes trabalhando no feed e no mapa 3D.",
+  "version": "0.6.0",
   "author": { "name": "Iron Office" },
-  "homepage": "https://iron-office.vercel.app",
+  "homepage": "https://ironoffice.app",
   "repository": "https://github.com/filipecoff21-code/iron-office-channel",
   "license": "MIT",
   "keywords": ["channel", "mcp", "iron-edge"]

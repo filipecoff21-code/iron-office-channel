@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redact, feedOn } from "./shared.mjs";
 
-const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
+const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const NOISE = new Set(["Read", "Grep", "Glob"]);
 
 // Versão do hook (0.3.8+): o site só grava evento que traz versão. Sessão aberta antes do update roda

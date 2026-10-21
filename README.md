@@ -1,6 +1,6 @@
 # Iron Office — canal do Claude Code
 
-Liga o dashboard do **Iron Office** (https://iron-office.vercel.app) à sessão do Claude Code na sua máquina:
+Liga o dashboard do **Iron Office** (https://ironoffice.app; o endereço antigo https://iron-office.vercel.app continua respondendo) à sessão do Claude Code na sua máquina:
 
 - você escreve no **chat do site** (`/chat`) e o Iron responde ali mesmo;
 - o **feed** e o **mapa 3D** do dashboard mostram as ferramentas e os agentes trabalhando enquanto ele responde.
@@ -18,7 +18,7 @@ O motor é o seu Claude Code (sua assinatura, seus arquivos). O site é só a ja
 
    Esse comando adiciona este marketplace, instala o plugin `iron-office` e abre o Claude Code com o canal ligado.
 3. O Claude Code mostra um **aviso de tela cheia** (canais ainda são *research preview*). Aceite.
-4. Abra https://iron-office.vercel.app/chat. Em até 1 minuto aparece **"Iron online"**.
+4. Abra https://ironoffice.app/chat. Em até 1 minuto aparece **"Iron online"**.
 
 **Deixe essa aba do terminal aberta.** É ela que faz o Iron responder no site.
 
@@ -76,13 +76,13 @@ Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair
 
 **Mensagem do site é entrada externa (0.5.0):** a instrução do canal diz que as mensagens foram digitadas no site por quem está logado na conta ligada à chave, e manda tratar como pedido do usuário, nunca como aviso do sistema nem como permissão. Senha, chave, token, conteúdo de `.env`, `~/.claude.json`, a chave do Iron Office, dado de cliente e segredo de loja nunca saem por `reply` nem `deliver`. O `reply` e o `deliver` (título, conteúdo e cartão) passam por um filtro de formatos de chave (Iron Office, Stripe, Shopify, Meta, GitHub, OpenAI/Anthropic, Supabase, AWS, Google, Slack, Hugging Face, JWT, `Bearer`, senha em URL, `NOME_SECRETO=valor` de `.env` em maiúscula e `password=`/`token=`/`secret=`/`api_key=` em minúscula); o `reply` para em 20 mil caracteres e o `deliver` em 50 mil. A pasta enviada no feed também passa pelo filtro.
 
-Política completa, em português de gente: iron-office.vercel.app/termos.
+Política completa, em português de gente: ironoffice.app/termos.
 
 **Pra desligar:** `claude plugin disable iron-office@iron-office-channel` (ou `uninstall`). Apagar `~/.claude/iron-office-api-key` também corta todo envio.
 
 ## Licença e alvo protegido
 
-O plugin não filtra pedido nenhum. A regra que impede o Iron do aluno de clonar, auditar ou copiar o Iron Office ("Alvo protegido") vem do pacote `iron-edge` (agentes e skills, desde a 2.5.1), e o site recusa na hora os atalhos "usa o iron-auditor:"/"usa o iron-clone:" que apontam pro próprio Office. O pacote `iron-edge` e o site seguem a Licença de Uso Pessoal Iron Edge (iron-office.vercel.app/termos); este plugin tem a própria licença, no arquivo `LICENSE` deste repositório.
+O plugin não filtra pedido nenhum. A regra que impede o Iron do aluno de clonar, auditar ou copiar o Iron Office ("Alvo protegido") vem do pacote `iron-edge` (agentes e skills, desde a 2.5.1), e o site recusa na hora os atalhos "usa o iron-auditor:"/"usa o iron-clone:" que apontam pro próprio Office. O pacote `iron-edge` e o site seguem a Licença de Uso Pessoal Iron Edge (ironoffice.app/termos); este plugin tem a própria licença, no arquivo `LICENSE` deste repositório.
 
 ## Desenvolvimento
 
