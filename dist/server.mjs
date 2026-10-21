@@ -17428,7 +17428,9 @@ function mcpServerNames(home = homedir(), cwd = process.cwd()) {
   const p = proj && typeof proj === "object" ? proj : {};
   const offJson = new Set(strList(p.disabledMcpjsonServers));
   const onJson = new Set(strList(p.enabledMcpjsonServers));
-  const fromJson = mcpKeys(readJson(join(cwd, ".mcp.json"))).filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
+  const mcpJson = readJson(join(cwd, ".mcp.json"));
+  if (mcpJson === void 0) return null;
+  const fromJson = mcpKeys(mcpJson).filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
   const off = new Set(strList(p.disabledMcpServers));
   const names = [.../* @__PURE__ */ new Set([...mcpKeys(user), ...mcpKeys(p), ...fromJson])].map((n) => n.trim()).filter((n) => n.length > 0 && n.length <= 64 && !off.has(n));
   names.sort((x, y) => Number(MCP_PRIORITY.includes(y)) - Number(MCP_PRIORITY.includes(x)));

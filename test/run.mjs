@@ -580,6 +580,12 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   writeFileSync(join(local, ".mcp.json"), JSON.stringify({ mcpServers: { aprovado: {}, "nao-aprovado": {} } }));
   const b4 = await rodar(local);
   check("escopo local da pasta entra; desligado no /mcp e .mcp.json não aprovado ficam fora", JSON.stringify(b4?.mcp_servers) === JSON.stringify(["meta-ads", "aprovado"]), JSON.stringify(b4));
+  // .mcp.json quebrado: presença sem o campo (não apaga o meta-ads que vinha dele)
+  const jsonRuim = casa();
+  writeFileSync(join(jsonRuim, ".claude.json"), JSON.stringify({ mcpServers: { "meta-ads": {} } }));
+  writeFileSync(join(jsonRuim, ".mcp.json"), "{ quebrado");
+  const b6 = await rodar(jsonRuim);
+  check(".mcp.json quebrado: presença sai sem o campo", !!b6 && !("mcp_servers" in b6) && !!b6.session_id, JSON.stringify(b6));
   // 80 servidores com meta-ads no fim: ele entra antes do corte de 50
   const cheio = casa();
   const muitos = Object.fromEntries([...Array.from({ length: 80 }, (_, i) => [`k${i}`, {}]), ["meta-ads", {}]]);

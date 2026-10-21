@@ -539,8 +539,8 @@ function presenceOnce() {
 // 0.4.0: nomes dos servidores MCP configurados (o site mostra Meta Ads "instalado" quando vem meta-ads).
 // Só as CHAVES de mcpServers, nunca os valores (lá podem morar tokens). Lê o escopo do usuário e o local
 // da pasta (~/.claude.json) e o .mcp.json do projeto só se o aluno aprovou. Desligado no /mcp não conta.
-// Arquivo ausente conta como nada; quebrado (lido no meio de uma escrita) devolve null e a presença sai
-// sem o campo, pro site manter a lista anterior em vez de apagar.
+// Arquivo ausente conta como nada; quebrado (~/.claude.json ou .mcp.json, ex.: lido no meio de uma escrita)
+// devolve null e a presença sai sem o campo, pro site manter a lista anterior em vez de apagar.
 const MAX_MCP = 50;
 const MCP_PRIORITY = ["meta-ads"]; // o que o site mede entra antes do corte de 50
 function mcpKeys(obj) {
@@ -570,7 +570,9 @@ function mcpServerNames(home = homedir(), cwd = process.cwd()) {
   const p = proj && typeof proj === "object" ? proj : {};
   const offJson = new Set(strList(p.disabledMcpjsonServers));
   const onJson = new Set(strList(p.enabledMcpjsonServers));
-  const fromJson = mcpKeys(readJson(join(cwd, ".mcp.json")))
+  const mcpJson = readJson(join(cwd, ".mcp.json"));
+  if (mcpJson === undefined) return null; // .mcp.json quebrado: igual ao ~/.claude.json quebrado
+  const fromJson = mcpKeys(mcpJson)
     .filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
   const off = new Set(strList(p.disabledMcpServers));
   const names = [...new Set([...mcpKeys(user), ...mcpKeys(p), ...fromJson])]
