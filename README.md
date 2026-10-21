@@ -74,6 +74,10 @@ Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair
 
 **Pra desligar:** `claude plugin disable iron-office@iron-office-channel` (ou `uninstall`). Apagar `~/.claude/iron-office-api-key` também corta todo envio.
 
+## Licença e alvo protegido
+
+O plugin não filtra pedido nenhum. A regra que impede o Iron do aluno de clonar, auditar ou copiar o Iron Office ("Alvo protegido") vem do pacote `iron-edge` (agentes e skills, desde a 2.5.1), e o site recusa na hora os atalhos "usa o iron-auditor:"/"usa o iron-clone:" que apontam pro próprio Office. Uso sob a Licença de Uso Pessoal Iron Edge (iron-office.vercel.app/termos).
+
 ## Desenvolvimento
 
 ```bash
