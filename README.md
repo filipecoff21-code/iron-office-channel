@@ -76,7 +76,7 @@ Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair
 
 ## Licença e alvo protegido
 
-O plugin não filtra pedido nenhum. A regra que impede o Iron do aluno de clonar, auditar ou copiar o Iron Office ("Alvo protegido") vem do pacote `iron-edge` (agentes e skills, desde a 2.5.1), e o site recusa na hora os atalhos "usa o iron-auditor:"/"usa o iron-clone:" que apontam pro próprio Office. Uso sob a Licença de Uso Pessoal Iron Edge (iron-office.vercel.app/termos).
+O plugin não filtra pedido nenhum. A regra que impede o Iron do aluno de clonar, auditar ou copiar o Iron Office ("Alvo protegido") vem do pacote `iron-edge` (agentes e skills, desde a 2.5.1), e o site recusa na hora os atalhos "usa o iron-auditor:"/"usa o iron-clone:" que apontam pro próprio Office. O pacote `iron-edge` e o site seguem a Licença de Uso Pessoal Iron Edge (iron-office.vercel.app/termos); este plugin tem a própria licença, no arquivo `LICENSE` deste repositório.
 
 ## Desenvolvimento
 
