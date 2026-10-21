@@ -16979,8 +16979,8 @@ var SECRET_PATTERNS = [
   // AWS access key id
   /\b(?:aws_secret_access_key|aws_session_token)\b\s*[=:\s]\s*\S+/gi,
   // AWS secret (aws configure set …)
-  /["']?\b[\w-]*(?:key|token|secret|password|passwd|pwd|pass)[\w-]*\b["']?\s*:\s*["'][^"']*["']/gi,
-  // "campo": "valor" (JSON/YAML)
+  /["']?\b[\w-]{0,40}(?:key|token|secret|password|passwd|pwd|pass)[\w-]{0,40}\b["']?\s*:\s*["'][^"']{0,500}["']/gi,
+  // "campo": "valor" (JSON/YAML); nomes limitados (sem custo quadrático)
   /--?(?:password|passwd|pass|token|secret|api-?key|auth|access-token)(?:[=\s]+)\S+/gi,
   // --password X, --token=X
   /(\s-p)(?!\s)\S+/g,
@@ -16991,25 +16991,41 @@ var SECRET_PATTERNS = [
   /:\/\/[^\s/:@]+:[^\s/@]+@/g
   // usuário:senha em URL
 ];
-function redact(s) {
-  let out = s;
-  for (const re of SECRET_PATTERNS) {
-    out = out.replace(re, (m, g1) => {
-      if (typeof g1 !== "string") return "[redigido]";
-      if (/^\s-[pu]/.test(g1)) return `${g1}[redigido]`;
-      if (/^(Bearer|Basic)$/i.test(g1)) return "[redigido]";
-      return /=|:/.test(m) ? `${g1}=[redigido]` : "[redigido]";
-    });
+var KEY_FORMAT_PATTERNS = [
+  ...SECRET_PATTERNS.slice(0, 11),
+  /\bAIza[0-9A-Za-z_-]{30,}/g,
+  // Google API key
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
+  // Slack
+  /\bhf_[A-Za-z0-9]{20,}/g,
+  // Hugging Face
+  /\bsb_(?:secret|publishable)_[A-Za-z0-9_-]{10,}/g,
+  // Supabase (chaves novas)
+  /:\/\/[^\s/:@]+:[^\s/@]+@/g,
+  // usuário:senha em URL
+  /\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASS|PWD)[A-Z0-9_]*)=\S+/g
+  // .env: NOME=valor
+];
+function redactKeys(s, max) {
+  const chars = Array.from(String(s ?? ""));
+  const capped = chars.length > max + 1e3 ? chars.slice(0, max + 1e3).join("") : chars.join("");
+  let out = capped;
+  for (const re of KEY_FORMAT_PATTERNS) {
+    out = out.replace(re, (m, g1) => typeof g1 === "string" && /=/.test(m) ? `${g1}=[redigido]` : "[redigido]");
   }
-  return out;
+  const final = Array.from(out);
+  return final.length > max ? { text: final.slice(0, max).join(""), cut: true } : { text: out, cut: false };
 }
 function feedOn(home = homedir()) {
+  let txt;
   try {
-    const m = readFileSync(join(home, ".iron", "config.yaml"), "utf8").match(/^office_feed:\s*["']?(on|off)["']?\s*(?:#.*)?$/m);
-    return !(m && m[1] === "off");
+    txt = readFileSync(join(home, ".iron", "config.yaml"), "utf8").replace(/^\uFEFF/, "");
   } catch {
     return true;
   }
+  const all = [...txt.matchAll(/^office_feed:[ \t]*["']?([A-Za-z0-9]+)["']?[ \t]*(?:#.*)?\r?$/gm)];
+  if (!all.length) return true;
+  return !["off", "false", "no", "0"].includes(all[all.length - 1][1].toLowerCase());
 }
 
 // src/server.mjs
@@ -17166,6 +17182,7 @@ function maskedKey() {
 }
 var AuthError = class extends Error {
 };
+var REPLY_MAX = 2e4;
 var DELIVER_MAX = 5e4;
 var SHOP_MAX = 6e4;
 async function api(path, { method = "GET", body } = {}) {
@@ -17311,7 +17328,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(`Esta sess\xE3o n\xE3o responde o Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     }
     const chatId = String(args.chat_id ?? "");
-    const body = String(args.text ?? "").trim();
+    const body = redactKeys(String(args.text ?? "").trim(), REPLY_MAX).text;
     if (!body) return text("Texto vazio.", true);
     if (chatId === "system") return text("chat_id=system \xE9 aviso do canal; n\xE3o precisa responder.", true);
     try {
@@ -17328,14 +17345,22 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (mode !== "active") {
       return text(`Esta sess\xE3o n\xE3o salva entregas no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     }
-    const title = redact(String(args.title ?? "").trim());
-    const agent = String(args.agent ?? "").trim() || "iron-ceo";
-    const raw = redact(String(args.content ?? ""));
-    const content = raw.length > DELIVER_MAX ? `${raw.slice(0, DELIVER_MAX)}
+    const title = redactKeys(String(args.title ?? "").trim(), 300).text;
+    const agent = redactKeys(String(args.agent ?? "").trim(), 80).text || "iron-ceo";
+    const c = redactKeys(String(args.content ?? ""), DELIVER_MAX);
+    const content = c.cut ? `${c.text}
 
-[entrega cortada em ${DELIVER_MAX / 1e3} mil caracteres]` : raw;
-    const type = String(args.type ?? "").trim();
-    const card = args.card && typeof args.card === "object" && !Array.isArray(args.card) ? args.card : null;
+[entrega cortada em ${DELIVER_MAX / 1e3} mil caracteres]` : c.text;
+    const type = redactKeys(String(args.type ?? "").trim(), 80).text;
+    const rawCard = args.card && typeof args.card === "object" && !Array.isArray(args.card) ? args.card : null;
+    let card = null;
+    if (rawCard) {
+      try {
+        card = JSON.parse(redactKeys(JSON.stringify(rawCard), DELIVER_MAX).text);
+      } catch {
+        card = null;
+      }
+    }
     if (!title || !content.trim()) return text("title e content s\xE3o obrigat\xF3rios.", true);
     try {
       const res = await api("/api/deliverables", {

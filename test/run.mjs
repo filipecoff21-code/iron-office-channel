@@ -656,6 +656,73 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   }
 }
 
+// ─── 15. gate r1 da onda 21: feed tolerante, filtro sem custo quadrático, campos fechados do hook ─
+{
+  console.log("gate r1 (0.5.0)");
+  const { feedOn, redactKeys, redact } = await import(join(ROOT, "hooks", "shared.mjs"));
+  const comConfig = (txt) => {
+    const h = casa();
+    mkdirSync(join(h, ".iron"), { recursive: true });
+    writeFileSync(join(h, ".iron", "config.yaml"), txt);
+    return h;
+  };
+  check("feedOn: OFF, false, no, 0 e \"off\" desligam", ["office_feed: OFF\n", "office_feed: false\n", "office_feed: no\n", "office_feed: 0\n", 'office_feed: "off"\n'].every((t) => feedOn(comConfig(t)) === false));
+  check("feedOn: BOM do Bloco de Notas e CRLF não ligam por engano", feedOn(comConfig("\uFEFFoffice_feed: off\r\nowner: x\r\n")) === false);
+  check("feedOn: a última ocorrência vale (on depois off = desligado; off depois on = ligado)", feedOn(comConfig("office_feed: on\noffice_feed: off\n")) === false && feedOn(comConfig("office_feed: off\noffice_feed: on\n")) === true);
+  check("feedOn: valor desconhecido, sem chave ou sem arquivo = ligado", feedOn(comConfig("office_feed: talvez\n")) === true && feedOn(comConfig("owner: x\n")) === true && feedOn(casa()) === true);
+  const t0 = Date.now();
+  redactKeys("a-".repeat(100000), 50000);
+  redact("a-".repeat(2000));
+  check("filtro: 200 mil caracteres de 'a-' em menos de 1 s (sem custo quadrático)", Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
+  const r = redactKeys("x".repeat(49999) + "😀fim", 50000);
+  check("corte: emoji no ponto de corte não vira metade solta", r.cut && !/[\uD800-\uDBFF]$/.test(r.text) && Array.from(r.text).length === 50000);
+  check("entrega: texto legítimo com Key:, Pass:, -pra fica como está", redactKeys("Key: valor. Pass: 5. Vai -pra frente.", 1000).text === "Key: valor. Pass: 5. Vai -pra frente.");
+  check("entrega: .env colado tem os valores apagados", redactKeys("DATABASE_PASSWORD=segredo123\nOPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz", 1000).text === "DATABASE_PASSWORD=[redigido]\nOPENAI_API_KEY=[redigido]");
+  // cartão e reply passam pelo filtro
+  {
+    const f = await fakeOffice((c) => {
+      if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+      if (c.path === "/api/deliverables") return { json: { ok: true, deliverable: { id: "d-1" } } };
+      if (c.path === "/api/chat/messages") return { json: { id: "m-1" } };
+    });
+    const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+    s.handshake();
+    await sleep(1500);
+    const chave = "iok_" + "d".repeat(48);
+    s.send({ jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "deliver", arguments: { title: "t", agent: "iron-auditor", content: "c", card: { kind: "auditoria", summary: `vazou ${chave}` } } } });
+    s.send({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "reply", arguments: { chat_id: "00000000-0000-0000-0000-000000000001", text: `sua chave é ${chave}` } } });
+    for (let i = 0; i < 100 && !(f.calls.some((c) => c.path === "/api/deliverables") && f.calls.some((c) => c.path === "/api/chat/messages")); i++) await sleep(20);
+    const d = f.calls.find((c) => c.path === "/api/deliverables")?.body ?? {};
+    const m = f.calls.find((c) => c.path === "/api/chat/messages")?.body ?? {};
+    check("deliver: o cartão também passa pelo filtro", JSON.stringify(d.card ?? {}).includes("[redigido]") && !JSON.stringify(d).includes(chave), JSON.stringify(d.card));
+    check("reply: a resposta passa pelo filtro", typeof m.text === "string" && m.text.includes("[redigido]") && !m.text.includes(chave), m.text);
+    s.p.kill();
+    f.srv.close();
+  }
+  // campos fechados: o que o hook manda é exatamente o que o /termos do site lista (lib/dataPolicy.ts).
+  // Mudou aqui? Mude a política do site junto.
+  {
+    const TOPO = ["cwd", "hook_event_name", "hook_version", "is_error", "session_id", "tool_input", "tool_name", "tool_response"];
+    const INPUT = ["agent_id", "agent_type", "command", "description", "file_path", "query", "subagent_type", "url"];
+    const f = await fakeOffice(() => ({ json: {} }));
+    const h = casa();
+    const evs = [
+      { tool_name: "Bash", tool_input: { command: "ls", description: "d", extra: "x" } },
+      { tool_name: "Write", tool_input: { file_path: "/a", content: "SEGREDO DO ARQUIVO" } },
+      { tool_name: "Agent", tool_input: { subagent_type: "iron-copy", description: "d", prompt: "o pedido inteiro" } },
+      { tool_name: "WebSearch", tool_input: { query: "q" } },
+      { tool_name: "WebFetch", tool_input: { url: "https://x.com/caminho?token=1" } },
+      { tool_name: "mcp__meta-ads__ads_get_ad_accounts", tool_input: { fields: "x" } },
+    ];
+    for (const e of evs) await runHook(h, f.url, { session_id: "s", cwd: "/tmp", hook_event_name: "PostToolUse", agent_id: "a1", agent_type: "iron-x", tool_response: { output: "resposta" }, ...e });
+    const bodies = f.calls.filter((c) => c.path === "/api/events").map((c) => c.body);
+    const topoOk = bodies.every((b) => Object.keys(b).every((k) => TOPO.includes(k)));
+    const inputOk = bodies.every((b) => Object.keys(b.tool_input ?? {}).every((k) => INPUT.includes(k)));
+    check("hook: só os campos que a política lista (topo e tool_input), nunca conteúdo, prompt nem resposta", bodies.length === evs.length && topoOk && inputOk && !JSON.stringify(bodies).includes("SEGREDO DO ARQUIVO") && !JSON.stringify(bodies).includes("o pedido inteiro") && bodies.every((b) => b.tool_response === null), JSON.stringify(bodies.map((b) => [Object.keys(b), Object.keys(b.tool_input ?? {})])));
+    f.srv.close();
+  }
+}
+
 for (const d of lixo) {
   try {
     rmSync(d, { recursive: true, force: true });

@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { redact, feedOn } from "../hooks/shared.mjs";
+import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
 const VERSION = "0.5.0";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
@@ -207,6 +207,7 @@ function maskedKey() {
 
 // ─── HTTP ───────────────────────────────────────────────────────────────
 class AuthError extends Error {}
+const REPLY_MAX = 20_000; // 0.5.0: o chat do site aceita até 20 mil
 const DELIVER_MAX = 50_000; // 0.5.0: entrega acima disso vai cortada (antes o site aceitava 200 mil)
 const SHOP_MAX = 60_000; // resposta do shop_query acima disso vai cortada (contexto do modelo)
 
@@ -373,7 +374,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(`Esta sessão não responde o Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     }
     const chatId = String(args.chat_id ?? "");
-    const body = String(args.text ?? "").trim();
+    // 0.5.0: resposta passa pelo filtro de formatos de chave e para no limite do chat (20 mil)
+    const body = redactKeys(String(args.text ?? "").trim(), REPLY_MAX).text;
     if (!body) return text("Texto vazio.", true);
     if (chatId === "system") return text("chat_id=system é aviso do canal; não precisa responder.", true);
     try {
@@ -393,12 +395,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(`Esta sessão não salva entregas no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     }
     // 0.5.0: o que vai pro site passa pelo mesmo filtro de segredos do hook, e o conteúdo para em 50 mil
-    const title = redact(String(args.title ?? "").trim());
-    const agent = String(args.agent ?? "").trim() || "iron-ceo";
-    const raw = redact(String(args.content ?? ""));
-    const content = raw.length > DELIVER_MAX ? `${raw.slice(0, DELIVER_MAX)}\n\n[entrega cortada em ${DELIVER_MAX / 1000} mil caracteres]` : raw;
-    const type = String(args.type ?? "").trim();
-    const card = args.card && typeof args.card === "object" && !Array.isArray(args.card) ? args.card : null;
+    const title = redactKeys(String(args.title ?? "").trim(), 300).text;
+    const agent = redactKeys(String(args.agent ?? "").trim(), 80).text || "iron-ceo";
+    const c = redactKeys(String(args.content ?? ""), DELIVER_MAX);
+    const content = c.cut ? `${c.text}\n\n[entrega cortada em ${DELIVER_MAX / 1000} mil caracteres]` : c.text;
+    const type = redactKeys(String(args.type ?? "").trim(), 80).text;
+    const rawCard = args.card && typeof args.card === "object" && !Array.isArray(args.card) ? args.card : null;
+    // o cartão é JSON livre do modelo: passa pelo mesmo filtro (texto do JSON), e se não voltar JSON, não vai
+    let card = null;
+    if (rawCard) {
+      try { card = JSON.parse(redactKeys(JSON.stringify(rawCard), DELIVER_MAX).text); } catch { card = null; }
+    }
     if (!title || !content.trim()) return text("title e content são obrigatórios.", true);
     try {
       const res = await api("/api/deliverables", {

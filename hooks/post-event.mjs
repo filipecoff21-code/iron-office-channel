@@ -131,7 +131,7 @@ async function main() {
     tool_input: toolInput,
     tool_response: null, // a resposta das ferramentas nunca sai da máquina
     is_error: false,
-    cwd: typeof hook.cwd === "string" ? hook.cwd : process.cwd(),
+    cwd: cut(typeof hook.cwd === "string" ? hook.cwd : process.cwd(), 300), // 0.5.0: a pasta também passa pelo filtro
     session_id: typeof hook.session_id === "string" ? hook.session_id : null,
     hook_event_name: event,
     hook_version: hookVersion(),
