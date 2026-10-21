@@ -12,7 +12,7 @@ import { execFile, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "0.3.9";
+const VERSION = "0.4.0";
 const BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -536,6 +536,27 @@ function presenceOnce() {
   return presenceInFlight;
 }
 
+// 0.4.0: nomes dos servidores MCP configurados (o site mostra Meta Ads "conectado" quando vem meta-ads).
+// Só as CHAVES de mcpServers, nunca os valores (lá podem morar tokens). Lê o escopo do usuário e o local
+// da pasta (~/.claude.json) e o .mcp.json do projeto. Arquivo ausente ou quebrado conta como nada.
+const MAX_MCP = 50;
+function mcpKeys(obj) {
+  const m = obj && typeof obj === "object" ? obj.mcpServers : null;
+  return m && typeof m === "object" && !Array.isArray(m) ? Object.keys(m) : [];
+}
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function mcpServerNames(home = homedir(), cwd = process.cwd()) {
+  const user = readJson(join(home, ".claude.json"));
+  const names = [...mcpKeys(user), ...mcpKeys(user?.projects?.[cwd]), ...mcpKeys(readJson(join(cwd, ".mcp.json")))];
+  return [...new Set(names)].filter((n) => n.length > 0 && n.length <= 64).slice(0, MAX_MCP);
+}
+
 async function presencePost() {
   try {
     await api("/api/chat/presence", {
@@ -544,6 +565,7 @@ async function presencePost() {
         session_id: SESSION_ID,
         cwd: process.cwd(),
         version: VERSION,
+        mcp_servers: mcpServerNames(),
       },
     });
   } catch (e) {

@@ -16952,7 +16952,7 @@ import { homedir } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-var VERSION = "0.3.9";
+var VERSION = "0.4.0";
 var BASE = (process.env.IRON_OFFICE_URL || "https://iron-office.vercel.app").replace(/\/+$/, "");
 var KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join(homedir(), ".iron");
@@ -17399,6 +17399,23 @@ function presenceOnce() {
   });
   return presenceInFlight;
 }
+var MAX_MCP = 50;
+function mcpKeys(obj) {
+  const m = obj && typeof obj === "object" ? obj.mcpServers : null;
+  return m && typeof m === "object" && !Array.isArray(m) ? Object.keys(m) : [];
+}
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function mcpServerNames(home = homedir(), cwd = process.cwd()) {
+  const user = readJson(join(home, ".claude.json"));
+  const names = [...mcpKeys(user), ...mcpKeys(user?.projects?.[cwd]), ...mcpKeys(readJson(join(cwd, ".mcp.json")))];
+  return [...new Set(names)].filter((n) => n.length > 0 && n.length <= 64).slice(0, MAX_MCP);
+}
 async function presencePost() {
   try {
     await api("/api/chat/presence", {
@@ -17406,7 +17423,8 @@ async function presencePost() {
       body: {
         session_id: SESSION_ID,
         cwd: process.cwd(),
-        version: VERSION
+        version: VERSION,
+        mcp_servers: mcpServerNames()
       }
     });
   } catch (e) {

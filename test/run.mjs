@@ -58,8 +58,9 @@ function fakeOffice(routes) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // sobe o servidor MCP; devolve o processo, as linhas que ele escreveu e um send()
-function startServer(home, url, env = {}) {
+function startServer(home, url, env = {}, cwd = undefined) {
   const p = spawn(process.execPath, [SERVER], {
+    cwd,
     env: { ...process.env, HOME: home, USERPROFILE: home, IRON_OFFICE_URL: url, ...env },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -539,6 +540,37 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     check(`bye.mjs ${mudo ? "site mudo" : "site ok"}: 1 POST bye e sai 0 em <= 3 s`, code === 0 && ms <= 3000 && posts.length === 1 && posts[0].body.bye === true && posts[0].body.session_id === "sessao-x" && posts[0].key === KEY, `${code} ${ms} ms ${JSON.stringify(posts)}`);
     f.srv.close();
   }
+}
+
+// ─── 13. presença com os nomes dos MCPs (0.4.0) ─────────────────────────
+{
+  console.log("presença com mcp_servers");
+  const pres = (calls) => calls.filter((c) => c.path === "/api/chat/presence" && !c.body?.bye);
+  const rodar = async (home) => {
+    const f = await fakeOffice((c) => (c.path === "/api/chat/pull" ? { json: { dashboard_open: true, messages: [] } } : undefined));
+    // cwd = a própria casa temporária: o .mcp.json do repo não entra na conta
+    const s = startServer(home, f.url, { IRON_OFFICE_CHANNEL: "1" }, home);
+    s.handshake();
+    for (let i = 0; i < 100 && pres(f.calls).length === 0; i++) await sleep(20);
+    s.p.kill();
+    f.srv.close();
+    return pres(f.calls)[0]?.body;
+  };
+  const comArquivo = casa();
+  const SEGREDO = "Bearer segredo-que-nao-sai";
+  writeFileSync(join(comArquivo, ".claude.json"), JSON.stringify({
+    mcpServers: { "meta-ads": { type: "http", url: "https://mcp.facebook.com/ads", headers: { Authorization: SEGREDO } }, supabase: { command: "npx" } },
+    projects: { "/outra/pasta": { mcpServers: { "nao-e-daqui": {} } } },
+  }));
+  const b1 = await rodar(comArquivo);
+  check("com ~/.claude.json: manda só os nomes", JSON.stringify(b1?.mcp_servers) === JSON.stringify(["meta-ads", "supabase"]), JSON.stringify(b1));
+  check("com ~/.claude.json: nenhum valor sai (nem url nem token)", !!b1 && !JSON.stringify(b1).includes("segredo") && !JSON.stringify(b1).includes("facebook.com"), JSON.stringify(b1));
+  const b2 = await rodar(casa());
+  check("sem ~/.claude.json: lista vazia", Array.isArray(b2?.mcp_servers) && b2.mcp_servers.length === 0, JSON.stringify(b2));
+  const quebrado = casa();
+  writeFileSync(join(quebrado, ".claude.json"), "{ isso não é json");
+  const b3 = await rodar(quebrado);
+  check("~/.claude.json quebrado: lista vazia, presença sai igual", Array.isArray(b3?.mcp_servers) && b3.mcp_servers.length === 0, JSON.stringify(b3));
 }
 
 for (const d of lixo) {
