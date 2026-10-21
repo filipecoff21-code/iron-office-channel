@@ -17003,8 +17003,10 @@ var KEY_FORMAT_PATTERNS = [
   // Supabase (chaves novas)
   /:\/\/[^\s/:@]+:[^\s/@]+@/g,
   // usuário:senha em URL
-  /\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASS|PWD)[A-Z0-9_]*)=\S+/g
-  // .env: NOME=valor
+  /\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASS|PWD)[A-Z0-9_]*)=\S+/g,
+  // .env: NOME=valor (com ou sem prefixo, MAIÚSCULO)
+  /\b(password|passwd|pwd|secret|token|api_?key|access_?token|client_?secret)=\S+/gi
+  // os mesmos nomes comuns em minúscula
 ];
 function redactKeys(s, max) {
   const chars = Array.from(String(s ?? ""));

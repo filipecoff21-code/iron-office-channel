@@ -677,6 +677,8 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const r = redactKeys("x".repeat(49999) + "😀fim", 50000);
   check("corte: emoji no ponto de corte não vira metade solta", r.cut && !/[\uD800-\uDBFF]$/.test(r.text) && Array.from(r.text).length === 50000);
   check("entrega: texto legítimo com Key:, Pass:, -pra fica como está", redactKeys("Key: valor. Pass: 5. Vai -pra frente.", 1000).text === "Key: valor. Pass: 5. Vai -pra frente.");
+  check("entrega: TOKEN=, SECRET= sem prefixo e password= em minúscula também saem apagados", redactKeys("TOKEN=abc SECRET=x password=hunter2 api_key=zz", 1000).text === "TOKEN=[redigido] SECRET=[redigido] password=[redigido] api_key=[redigido]", redactKeys("TOKEN=abc SECRET=x password=hunter2 api_key=zz", 1000).text);
+  check("entrega: palavra comum com 'key' no meio (monkey=1) fica", redactKeys("monkey=1 keyboard=2", 1000).text === "monkey=1 keyboard=2");
   check("entrega: .env colado tem os valores apagados", redactKeys("DATABASE_PASSWORD=segredo123\nOPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz", 1000).text === "DATABASE_PASSWORD=[redigido]\nOPENAI_API_KEY=[redigido]");
   // cartão e reply passam pelo filtro
   {
