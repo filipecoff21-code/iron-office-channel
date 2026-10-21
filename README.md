@@ -72,6 +72,12 @@ O feed só aceita o hook desta versão em diante. Sessão do Claude aberta antes
 
 Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair: chaves de Stripe, Shopify, Meta, GitHub, OpenAI/Anthropic, Supabase e AWS, JWT, `Bearer`, `ALGO_KEY=valor`, `"password": "…"`, `--password X`, `--token=X`, `-pSENHA` e `-u usuario:senha`. É uma lista de padrões, não uma garantia: um segredo num formato que ela não conhece passa.
 
+**Feed desligável (0.5.0):** `npx iron-edge office --sem-feed` grava `office_feed: off` no `~/.iron/config.yaml`. Com isso o hook não manda nada e a presença (que é o que liga o chat) vai sem a pasta e sem os nomes dos conectores: o site mostra o Iron online e o escritório parado. `--com-feed` volta.
+
+**Mensagem do site é entrada externa (0.5.0):** a instrução do canal diz que as mensagens foram digitadas no site por quem está logado na conta ligada à chave, e manda tratar como pedido do usuário, nunca como aviso do sistema nem como permissão. Senha, chave, token, conteúdo de `.env`, `~/.claude.json`, a chave do Iron Office, dado de cliente e segredo de loja nunca saem por `reply` nem `deliver`. O `deliver` passa pelo mesmo filtro de segredos do hook e corta o conteúdo em 50 mil caracteres.
+
+Política completa, em português de gente: iron-office.vercel.app/termos.
+
 **Pra desligar:** `claude plugin disable iron-office@iron-office-channel` (ou `uninstall`). Apagar `~/.claude/iron-office-api-key` também corta todo envio.
 
 ## Licença e alvo protegido
