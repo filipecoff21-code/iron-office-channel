@@ -214,6 +214,16 @@ function storeArg(args) {
   const v = typeof args.project_id === "string" ? args.project_id.trim() : "";
   return UUID_RE.test(v) ? v : lastStoreId;
 }
+// só o que o modelo passou: escrita na loja nunca vai pela "última mensagem" (o aluno pode ter trocado de loja
+// no meio da tarefa; sem id, o site decide: 1 loja conectada = ela, 2+ = 409 "diga qual")
+function explicitStore(args) {
+  const v = typeof args.project_id === "string" ? args.project_id.trim() : "";
+  return UUID_RE.test(v) ? v : null;
+}
+// a operação é mutation? (comentários e espaços antes; o site confere de novo, isto só escolhe a loja)
+function isMutation(query) {
+  return /^mutation\b/.test(query.replace(/^(\s|#[^\n]*\n?|\uFEFF)+/, ""));
+}
 
 // ids já injetados na sessão: se o ack falhar e o pull devolver de novo, só confirma, não repete
 const injected = new Set();
@@ -275,8 +285,8 @@ const INSTRUCTIONS = DEGRADED
       "Auditoria ou Spy: o relatório do agente termina com um bloco `## Cartão` (JSON). Passe esse JSON em `card` no `deliver`, sem reescrever. O `reply` final vira 1 ou 2 linhas (nota + frase) e a url; o cartão aparece sozinho no chat.",
       "Pedido `usa o iron-auditor:` traz `dono=sim|nao` (o site é do aluno ou de terceiro): repasse ao auditor como está.",
       "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
-      "A primeira linha `[loja: …]` diz a loja ativa do aluno: o pedido é sobre ela. Se a ficha existe (caminho relativo à pasta onde esta sessão abriu), leia-a antes de responder; se diz 'ainda sem ficha', responda normalmente e, se o pedido for sobre a loja, sugira 'começar com a loja' (vem na próxima versão).",
-      "`reply`, `deliver` e `shop_query` já vão pra loja da última mensagem; passe `project_id` só pra falar de outra loja (a lista sai no `shop_status`).",
+      "A primeira linha `[loja: …]` diz a loja ativa do aluno: o pedido é sobre ela. Se a ficha existe (caminho relativo à pasta onde esta sessão abriu), leia-a antes de responder; se diz 'ainda sem ficha', responda normalmente, sem prometer ficha.",
+      "`reply`, `deliver` e as LEITURAS do `shop_query` vão pra loja da última mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (pegue no `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
       'Mensagens com chat_id="system" são avisos do próprio canal: repasse ao usuário no terminal, não use `reply` nelas.',
       "Só a sessão aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sessão provavelmente não é o canal: a ferramenta `status` confirma.",
     ].join("\n");
@@ -350,7 +360,7 @@ const TOOLS = DEGRADED
           properties: {
             query: { type: "string", description: "A query ou mutation GraphQL (Admin API)." },
             variables: { type: "object", description: "Opcional: variáveis da query." },
-            project_id: { type: "string", description: "Opcional: id da loja (do shop_status). Sem ele, a loja da última mensagem; com 1 loja só, ela." },
+            project_id: { type: "string", description: "id da loja (do shop_status). Leitura sem ele: a loja da última mensagem. Mutation: passe sempre (sem ele, só passa se houver 1 loja conectada)." },
           },
           required: ["query"],
         },
@@ -476,7 +486,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!query) return text("query é obrigatória.", true);
     const variables = args.variables && typeof args.variables === "object" && !Array.isArray(args.variables) ? args.variables : undefined;
     try {
-      const store = storeArg(args);
+      const store = isMutation(query) ? explicitStore(args) : storeArg(args);
       const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...(variables ? { variables } : {}), ...(store ? { project_id: store } : {}) } });
       const out = JSON.stringify(res);
       if (out.length > SHOP_MAX) {

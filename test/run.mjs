@@ -790,6 +790,12 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   try { st = JSON.parse(txt(s, 4)); } catch {}
   check("shop_status com 1 loja: { stores, active }", st.stores?.length === 1 && st.active === LOJA, txt(s, 4));
   check("shop_query repassa project_id", f.calls.find((c) => c.path === "/api/shopify/graphql" && c.method === "POST")?.body?.project_id === LOJA);
+  call(s, 12, "shop_query", { query: "# salva\n mutation { productUpdate(input: {}) { product { id } } }" });
+  call(s, 13, "shop_query", { query: "mutation { productUpdate(input: {}) { product { id } } }", project_id: OUTRA });
+  await sleep(600);
+  const muts = f.calls.filter((c) => c.path === "/api/shopify/graphql" && c.method === "POST" && /productUpdate/.test(c.body.query));
+  check("mutation sem project_id NÃO vai pela loja da última mensagem (o site decide ou pede pra escolher)", muts[0] && !("project_id" in muts[0].body), JSON.stringify(muts[0]?.body));
+  check("mutation com project_id explícito leva ele", muts[1]?.body?.project_id === OUTRA, JSON.stringify(muts[1]?.body));
 
   // a 2ª mensagem chega sem loja: lastStoreId zera, e o texto vai puro
   soltar = true;

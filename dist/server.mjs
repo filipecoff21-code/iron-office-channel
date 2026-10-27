@@ -17188,6 +17188,13 @@ function storeArg(args) {
   const v = typeof args.project_id === "string" ? args.project_id.trim() : "";
   return UUID_RE.test(v) ? v : lastStoreId;
 }
+function explicitStore(args) {
+  const v = typeof args.project_id === "string" ? args.project_id.trim() : "";
+  return UUID_RE.test(v) ? v : null;
+}
+function isMutation(query) {
+  return /^mutation\b/.test(query.replace(/^(\s|#[^\n]*\n?|\uFEFF)+/, ""));
+}
 var injected = /* @__PURE__ */ new Set();
 function remember(id) {
   injected.add(id);
@@ -17240,8 +17247,8 @@ var INSTRUCTIONS = DEGRADED ? [
   "Auditoria ou Spy: o relat\xF3rio do agente termina com um bloco `## Cart\xE3o` (JSON). Passe esse JSON em `card` no `deliver`, sem reescrever. O `reply` final vira 1 ou 2 linhas (nota + frase) e a url; o cart\xE3o aparece sozinho no chat.",
   "Pedido `usa o iron-auditor:` traz `dono=sim|nao` (o site \xE9 do aluno ou de terceiro): repasse ao auditor como est\xE1.",
   "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
-  "A primeira linha `[loja: \u2026]` diz a loja ativa do aluno: o pedido \xE9 sobre ela. Se a ficha existe (caminho relativo \xE0 pasta onde esta sess\xE3o abriu), leia-a antes de responder; se diz 'ainda sem ficha', responda normalmente e, se o pedido for sobre a loja, sugira 'come\xE7ar com a loja' (vem na pr\xF3xima vers\xE3o).",
-  "`reply`, `deliver` e `shop_query` j\xE1 v\xE3o pra loja da \xFAltima mensagem; passe `project_id` s\xF3 pra falar de outra loja (a lista sai no `shop_status`).",
+  "A primeira linha `[loja: \u2026]` diz a loja ativa do aluno: o pedido \xE9 sobre ela. Se a ficha existe (caminho relativo \xE0 pasta onde esta sess\xE3o abriu), leia-a antes de responder; se diz 'ainda sem ficha', responda normalmente, sem prometer ficha.",
+  "`reply`, `deliver` e as LEITURAS do `shop_query` v\xE3o pra loja da \xFAltima mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (pegue no `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
   'Mensagens com chat_id="system" s\xE3o avisos do pr\xF3prio canal: repasse ao usu\xE1rio no terminal, n\xE3o use `reply` nelas.',
   "S\xF3 a sess\xE3o aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sess\xE3o provavelmente n\xE3o \xE9 o canal: a ferramenta `status` confirma."
 ].join("\n");
@@ -17307,7 +17314,7 @@ var TOOLS = DEGRADED ? [
       properties: {
         query: { type: "string", description: "A query ou mutation GraphQL (Admin API)." },
         variables: { type: "object", description: "Opcional: vari\xE1veis da query." },
-        project_id: { type: "string", description: "Opcional: id da loja (do shop_status). Sem ele, a loja da \xFAltima mensagem; com 1 loja s\xF3, ela." }
+        project_id: { type: "string", description: "id da loja (do shop_status). Leitura sem ele: a loja da \xFAltima mensagem. Mutation: passe sempre (sem ele, s\xF3 passa se houver 1 loja conectada)." }
       },
       required: ["query"]
     }
@@ -17422,7 +17429,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!query) return text("query \xE9 obrigat\xF3ria.", true);
     const variables = args.variables && typeof args.variables === "object" && !Array.isArray(args.variables) ? args.variables : void 0;
     try {
-      const store = storeArg(args);
+      const store = isMutation(query) ? explicitStore(args) : storeArg(args);
       const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...variables ? { variables } : {}, ...store ? { project_id: store } : {} } });
       const out = JSON.stringify(res);
       if (out.length > SHOP_MAX) {
