@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.6.0";
+var VERSION = "0.7.0";
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17173,6 +17173,21 @@ var state = {
   dashboardOpen: false,
   authPausedUntil: 0
 };
+var lastStoreId = null;
+var KIND_LABEL = { shopify: "Loja Shopify", cliente: "Cliente", negocio: "Neg\xF3cio sem loja" };
+function storePrefix(store) {
+  if (!store || typeof store !== "object" || typeof store.id !== "string") return "";
+  const name = redactKeys(String(store.name ?? "").replace(/[\r\n\]]/g, " ").trim(), 80).text || "sem nome";
+  const kind = KIND_LABEL[store.kind] ?? "Loja";
+  const path = typeof store.ficha_path === "string" && store.ficha_path.trim() ? redactKeys(store.ficha_path.replace(/[\r\n\]]/g, " ").trim(), 200).text : "ainda sem ficha";
+  return `[loja: ${name} \xB7 ${kind} \xB7 ficha: ${path}]
+`;
+}
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function storeArg(args) {
+  const v = typeof args.project_id === "string" ? args.project_id.trim() : "";
+  return UUID_RE.test(v) ? v : lastStoreId;
+}
 var injected = /* @__PURE__ */ new Set();
 function remember(id) {
   injected.add(id);
@@ -17199,7 +17214,12 @@ async function api(path, { method = "GET", body } = {}) {
     });
     if (res.status === 401) throw new AuthError("chave inv\xE1lida");
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+    if (!res.ok) {
+      const err = new Error(json.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      err.data = json;
+      throw err;
+    }
     return json;
   } finally {
     clearTimeout(t);
@@ -17220,6 +17240,8 @@ var INSTRUCTIONS = DEGRADED ? [
   "Auditoria ou Spy: o relat\xF3rio do agente termina com um bloco `## Cart\xE3o` (JSON). Passe esse JSON em `card` no `deliver`, sem reescrever. O `reply` final vira 1 ou 2 linhas (nota + frase) e a url; o cart\xE3o aparece sozinho no chat.",
   "Pedido `usa o iron-auditor:` traz `dono=sim|nao` (o site \xE9 do aluno ou de terceiro): repasse ao auditor como est\xE1.",
   "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
+  "A primeira linha `[loja: \u2026]` diz a loja ativa do aluno: o pedido \xE9 sobre ela. Se a ficha existe (caminho relativo \xE0 pasta onde esta sess\xE3o abriu), leia-a antes de responder; se diz 'ainda sem ficha', responda normalmente e, se o pedido for sobre a loja, sugira 'come\xE7ar com a loja' (vem na pr\xF3xima vers\xE3o).",
+  "`reply`, `deliver` e `shop_query` j\xE1 v\xE3o pra loja da \xFAltima mensagem; passe `project_id` s\xF3 pra falar de outra loja (a lista sai no `shop_status`).",
   'Mensagens com chat_id="system" s\xE3o avisos do pr\xF3prio canal: repasse ao usu\xE1rio no terminal, n\xE3o use `reply` nelas.',
   "S\xF3 a sess\xE3o aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sess\xE3o provavelmente n\xE3o \xE9 o canal: a ferramenta `status` confirma."
 ].join("\n");
@@ -17247,7 +17269,8 @@ var TOOLS = DEGRADED ? [
       type: "object",
       properties: {
         chat_id: { type: "string", description: "O chat_id da tag <channel> recebida." },
-        text: { type: "string", description: "Texto da resposta, markdown simples." }
+        text: { type: "string", description: "Texto da resposta, markdown simples." },
+        project_id: { type: "string", description: "Opcional: id da loja. Sem ele, vai pra loja da \xFAltima mensagem." }
       },
       required: ["chat_id", "text"]
     }
@@ -17265,24 +17288,26 @@ var TOOLS = DEGRADED ? [
         card: {
           type: "object",
           description: "Opcional: o JSON do bloco `## Cart\xE3o` que o agente devolveu, sem reescrever: { kind, score, summary, items: [{ title, why, effort, action }] }."
-        }
+        },
+        project_id: { type: "string", description: "Opcional: id da loja da entrega. Sem ele, a loja da \xFAltima mensagem." }
       },
       required: ["title", "agent", "content"]
     }
   },
   {
     name: "shop_status",
-    description: "Diz se a loja Shopify do aluno est\xE1 conectada no Iron Office: { connected, shopDomain }. Funciona em qualquer sess\xE3o (n\xE3o s\xF3 no canal). Primeiro passo do agente iron-shopify.",
+    description: "Lista as lojas do aluno no Iron Office: { stores: [{ project_id, name, kind, shopDomain, connected }], active } (active = a loja da \xFAltima mensagem do chat). Funciona em qualquer sess\xE3o (n\xE3o s\xF3 no canal). Primeiro passo do agente iron-shopify.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "shop_query",
-    description: "Roda uma query ou mutation GraphQL da Admin API na loja Shopify conectada no Iron Office e devolve o JSON da Shopify. As credenciais ficam no servidor; a chave do Iron Office fica com este plugin. Funciona em qualquer sess\xE3o.",
+    description: "Roda uma query ou mutation GraphQL da Admin API na loja Shopify conectada no Iron Office e devolve o JSON da Shopify. Leitura passa; escrita s\xF3 em produtos, cole\xE7\xF5es, m\xEDdia, metacampos, arquivos, p\xE1ginas, tema, publica\xE7\xE3o, descontos, tradu\xE7\xF5es e metaobjetos (pedido, cliente e pagamento o Iron Office recusa). As credenciais ficam no servidor; a chave do Iron Office fica com este plugin. Funciona em qualquer sess\xE3o.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", description: "A query ou mutation GraphQL (Admin API)." },
-        variables: { type: "object", description: "Opcional: vari\xE1veis da query." }
+        variables: { type: "object", description: "Opcional: vari\xE1veis da query." },
+        project_id: { type: "string", description: "Opcional: id da loja (do shop_status). Sem ele, a loja da \xFAltima mensagem; com 1 loja s\xF3, ela." }
       },
       required: ["query"]
     }
@@ -17334,9 +17359,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!body) return text("Texto vazio.", true);
     if (chatId === "system") return text("chat_id=system \xE9 aviso do canal; n\xE3o precisa responder.", true);
     try {
+      const store = storeArg(args);
       await api("/api/chat/messages", {
         method: "POST",
-        body: { conversation_id: chatId || null, text: body }
+        body: { conversation_id: chatId || null, text: body, ...store ? { meta: { project_id: store } } : {} }
       });
       return text("Enviado ao Iron Office.");
     } catch (e) {
@@ -17368,7 +17394,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const res = await api("/api/deliverables", {
         method: "POST",
         // o cartão vai como veio: quem poda nos limites é o servidor
-        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...card ? { card } : {} }
+        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...card ? { card } : {}, ...storeArg(args) ? { project_id: storeArg(args) } : {} }
       });
       const id = res?.deliverable?.id;
       if (typeof id !== "string" || !id) return text("O Iron Office n\xE3o devolveu o id da entrega.", true);
@@ -17380,9 +17406,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
   if (name === "shop_status") {
     try {
-      const res = await api("/api/shopify/graphql");
-      if (!res?.connected) return text(`Loja n\xE3o conectada: ${BASE.replace(/^https?:\/\//, "")}/integrations`);
-      return text(JSON.stringify({ connected: true, shopDomain: res.shopDomain ?? null }));
+      const res = await api("/api/shopify/graphql?stores=1");
+      if (!Array.isArray(res?.stores)) {
+        if (!res?.connected) return text(`Loja n\xE3o conectada: ${BASE.replace(/^https?:\/\//, "")}/integrations`);
+        return text(JSON.stringify({ connected: true, shopDomain: res.shopDomain ?? null }));
+      }
+      if (res.stores.length === 0) return text(`Nenhuma loja criada ainda: ${BASE.replace(/^https?:\/\//, "")}/integrations`);
+      return text(JSON.stringify({ stores: res.stores, active: lastStoreId }));
     } catch (e) {
       return text(`Falhou ao consultar a loja: ${e.message}`, true);
     }
@@ -17392,7 +17422,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!query) return text("query \xE9 obrigat\xF3ria.", true);
     const variables = args.variables && typeof args.variables === "object" && !Array.isArray(args.variables) ? args.variables : void 0;
     try {
-      const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...variables ? { variables } : {} } });
+      const store = storeArg(args);
+      const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...variables ? { variables } : {}, ...store ? { project_id: store } : {} } });
       const out = JSON.stringify(res);
       if (out.length > SHOP_MAX) {
         return text(`${out.slice(0, SHOP_MAX)}
@@ -17400,6 +17431,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       return text(out);
     } catch (e) {
+      if (e.status === 409 && Array.isArray(e.data?.stores)) {
+        const list = e.data.stores.map((x) => `${redactKeys(String(x.name ?? ""), 80).text} (project_id ${x.project_id})`).join(", ");
+        return text(`Mais de uma loja conectada: diga qual loja (passe project_id): ${list}.`, true);
+      }
       return text(`Falhou a consulta na loja: ${e.message}`, true);
     }
   }
@@ -17435,7 +17470,8 @@ async function pullOnce() {
       toAck.push(m.id);
       continue;
     }
-    const ok = await notify(content, {
+    const store = m.store && typeof m.store === "object" && typeof m.store.id === "string" ? m.store : null;
+    const ok = await notify(`${storePrefix(store)}${content}`, {
       chat_id: typeof m.conversation_id === "string" && m.conversation_id ? m.conversation_id : DEFAULT_CONVERSATION,
       message_id: m.id,
       user: "aluno",
@@ -17444,6 +17480,7 @@ async function pullOnce() {
     if (ok) {
       remember(m.id);
       toAck.push(m.id);
+      lastStoreId = store && UUID_RE.test(store.id) ? store.id : null;
     }
   }
   if (toAck.length > 0) {

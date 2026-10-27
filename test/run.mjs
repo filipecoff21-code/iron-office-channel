@@ -377,7 +377,8 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   console.log("loja Shopify");
   const f = await fakeOffice((c) => {
     if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
-    if (c.path === "/api/shopify/graphql" && c.method === "GET") return { json: { connected: true, shopDomain: "loja.myshopify.com" } };
+    // site de antes da onda 26a: ignora ?stores=1 e devolve uma loja só (o plugin 0.7.0 cai no formato antigo)
+    if (c.path.startsWith("/api/shopify/graphql") && c.method === "GET") return { json: { connected: true, shopDomain: "loja.myshopify.com" } };
     if (c.path === "/api/shopify/graphql" && c.method === "POST") return { json: { data: { shop: { name: "Loja" } } } };
   });
   const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
@@ -391,7 +392,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 3, "shop_query", { query: "query($n:Int!){ products(first:$n){ edges { node { id } } } }", variables: { n: 3 } });
   call(s, 4, "shop_query", { query: "  " });
   await sleep(800);
-  const get = f.calls.filter((c) => c.path === "/api/shopify/graphql" && c.method === "GET");
+  const get = f.calls.filter((c) => c.path.startsWith("/api/shopify/graphql") && c.method === "GET");
   const post = f.calls.filter((c) => c.path === "/api/shopify/graphql" && c.method === "POST");
   check("shop_status faz GET com x-api-key", get.length === 1 && get[0].key === KEY && /loja\.myshopify\.com/.test(result(s, 2)?.content?.[0]?.text ?? ""), JSON.stringify(result(s, 2)));
   check("shop_query manda { query, variables } no POST", post.length === 1 && post[0].key === KEY && post[0].body.variables?.n === 3 && /products/.test(post[0].body.query), JSON.stringify(post));
@@ -733,6 +734,83 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     check("hook: só os campos que a política lista (topo e tool_input), nunca conteúdo, prompt nem resposta", bodies.length === evs.length && topoOk && inputOk && !JSON.stringify(bodies).includes("SEGREDO DO ARQUIVO") && !JSON.stringify(bodies).includes("o pedido inteiro") && bodies.every((b) => b.tool_response === null), JSON.stringify(bodies.map((b) => [Object.keys(b), Object.keys(b.tool_input ?? {})])));
     f.srv.close();
   }
+}
+
+// ─── 14. loja ativa (0.7.0, onda 26a) ───────────────────────────────────
+{
+  console.log("loja ativa (0.7.0)");
+  const LOJA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const OUTRA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const fila = [
+    { id: "s1", conversation_id: "c1", content: "em qual loja estamos?", meta: { project_id: LOJA }, created_at: "2026-10-27T00:00:00Z",
+      store: { id: LOJA, name: "Vulkan iok_" + "b".repeat(48), kind: "shopify", slug: "vulkan", ficha_path: null } },
+  ];
+  let segunda = false;
+  let soltar = false; // a 2ª mensagem (sem loja) só sai depois das checagens da 1ª
+  let lojas = [{ project_id: LOJA, name: "Vulkan", kind: "shopify", shopDomain: "v.myshopify.com", connected: true }];
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") {
+      const m = fila.splice(0, 1);
+      if (!m.length && !segunda && soltar) {
+        segunda = true;
+        return { json: { dashboard_open: true, messages: [{ id: "s2", conversation_id: "c1", content: "e agora?", meta: {}, created_at: "2026-10-27T00:01:00Z", store: null }] } };
+      }
+      return { json: { dashboard_open: true, messages: m } };
+    }
+    if (c.path === "/api/shopify/graphql?stores=1") return { json: { stores: lojas } };
+    if (c.path === "/api/shopify/graphql" && c.method === "POST" && !c.body.project_id) {
+      return { status: 409, json: { error: "Mais de uma loja conectada: diga qual.", stores: [{ project_id: LOJA, name: "Vulkan" }, { project_id: OUTRA, name: "Cliente teste" }] } };
+    }
+    if (c.path === "/api/shopify/graphql" && c.method === "POST") return { json: { data: { shop: { name: "ok" } } } };
+    if (c.path === "/api/deliverables") return { json: { ok: true, deliverable: { id: "d-1" } } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const result = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => result(s, id)?.content?.[0]?.text ?? "";
+
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(2500);
+  const n1 = notifs(s.out)[0]?.msg.params.content ?? "";
+  check("prefixo [loja: nome · tipo · ficha: ainda sem ficha] na 1ª linha", n1.startsWith("[loja: Vulkan ") && n1.includes(" · Loja Shopify · ficha: ainda sem ficha]\nem qual loja estamos?"), JSON.stringify(n1));
+  check("nome da loja passa pelo filtro de segredos", !n1.includes("iok_" + "b".repeat(48)), JSON.stringify(n1));
+  call(s, 2, "reply", { chat_id: "c1", text: "Estamos na Vulkan." });
+  call(s, 3, "deliver", { title: "T", agent: "iron-ceo", content: "C" });
+  call(s, 4, "shop_status", {});
+  call(s, 5, "shop_query", { query: "{ shop { name } }" });
+  call(s, 6, "reply", { chat_id: "c1", text: "na outra", project_id: OUTRA });
+  call(s, 7, "reply", { chat_id: "c1", text: "lixo", project_id: "nao-e-uuid" });
+  await sleep(1200);
+  const replies = f.calls.filter((c) => c.path === "/api/chat/messages");
+  check("reply leva meta.project_id da última mensagem", replies[0]?.body?.meta?.project_id === LOJA, JSON.stringify(replies[0]?.body));
+  check("reply com project_id explícito vai pra ela", replies[1]?.body?.meta?.project_id === OUTRA, JSON.stringify(replies[1]?.body));
+  check("project_id que não é uuid cai na loja da última mensagem", replies[2]?.body?.meta?.project_id === LOJA, JSON.stringify(replies[2]?.body));
+  check("deliver leva project_id da última mensagem", f.calls.find((c) => c.path === "/api/deliverables")?.body?.project_id === LOJA);
+  let st = {};
+  try { st = JSON.parse(txt(s, 4)); } catch {}
+  check("shop_status com 1 loja: { stores, active }", st.stores?.length === 1 && st.active === LOJA, txt(s, 4));
+  check("shop_query repassa project_id", f.calls.find((c) => c.path === "/api/shopify/graphql" && c.method === "POST")?.body?.project_id === LOJA);
+
+  // a 2ª mensagem chega sem loja: lastStoreId zera, e o texto vai puro
+  soltar = true;
+  await sleep(2500);
+  const n2 = notifs(s.out)[1]?.msg.params.content ?? "";
+  check("mensagem sem loja vai sem prefixo", n2 === "e agora?", JSON.stringify(n2));
+  lojas = [];
+  call(s, 8, "shop_status", {});
+  call(s, 9, "shop_query", { query: "{ shop { name } }" });
+  call(s, 10, "reply", { chat_id: "c1", text: "sem loja" });
+  await sleep(1000);
+  check("shop_status com 0 lojas: manda criar", /Nenhuma loja criada/.test(txt(s, 8)), txt(s, 8));
+  check("409 vira 'diga qual loja' com a lista", result(s, 9)?.isError === true && /diga qual loja/.test(txt(s, 9)) && txt(s, 9).includes(OUTRA) && /Cliente teste/.test(txt(s, 9)), txt(s, 9));
+  check("depois de mensagem sem loja, reply vai sem meta", !("meta" in (f.calls.filter((c) => c.path === "/api/chat/messages").at(-1)?.body ?? {})));
+  lojas = [lojas, { project_id: LOJA, name: "A" }, { project_id: OUTRA, name: "B" }].flat();
+  call(s, 11, "shop_status", {});
+  await sleep(500);
+  try { st = JSON.parse(txt(s, 11)); } catch { st = {}; }
+  check("shop_status com 2 lojas: lista as 2, active null", st.stores?.length === 2 && st.active === null, txt(s, 11));
+  s.p.kill();
+  f.srv.close();
 }
 
 for (const d of lixo) {

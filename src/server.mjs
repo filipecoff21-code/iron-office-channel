@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.6.0";
+const VERSION = "0.7.0";
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -193,6 +193,28 @@ const state = {
   authPausedUntil: 0,
 };
 
+// 0.7.0 (onda 26a): a loja da última mensagem injetada. reply/deliver/shop_query usam quando o modelo não passa.
+let lastStoreId = null;
+const KIND_LABEL = { shopify: "Loja Shopify", cliente: "Cliente", negocio: "Negócio sem loja" };
+
+// "[loja: Vulkan · Loja Shopify · ficha: Lojas/vulkan/ficha.md]" — nome e caminho passam pelo filtro de segredos
+function storePrefix(store) {
+  if (!store || typeof store !== "object" || typeof store.id !== "string") return "";
+  const name = redactKeys(String(store.name ?? "").replace(/[\r\n\]]/g, " ").trim(), 80).text || "sem nome";
+  const kind = KIND_LABEL[store.kind] ?? "Loja";
+  const path = typeof store.ficha_path === "string" && store.ficha_path.trim()
+    ? redactKeys(store.ficha_path.replace(/[\r\n\]]/g, " ").trim(), 200).text
+    : "ainda sem ficha";
+  return `[loja: ${name} · ${kind} · ficha: ${path}]\n`;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// project_id que o modelo passou (se for uuid) ou a loja da última mensagem
+function storeArg(args) {
+  const v = typeof args.project_id === "string" ? args.project_id.trim() : "";
+  return UUID_RE.test(v) ? v : lastStoreId;
+}
+
 // ids já injetados na sessão: se o ack falhar e o pull devolver de novo, só confirma, não repete
 const injected = new Set();
 function remember(id) {
@@ -223,7 +245,12 @@ async function api(path, { method = "GET", body } = {}) {
     });
     if (res.status === 401) throw new AuthError("chave inválida");
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+    if (!res.ok) {
+      const err = new Error(json.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      err.data = json; // 0.7.0: o 409 "diga qual loja" traz a lista
+      throw err;
+    }
     return json;
   } finally {
     clearTimeout(t);
@@ -248,6 +275,8 @@ const INSTRUCTIONS = DEGRADED
       "Auditoria ou Spy: o relatório do agente termina com um bloco `## Cartão` (JSON). Passe esse JSON em `card` no `deliver`, sem reescrever. O `reply` final vira 1 ou 2 linhas (nota + frase) e a url; o cartão aparece sozinho no chat.",
       "Pedido `usa o iron-auditor:` traz `dono=sim|nao` (o site é do aluno ou de terceiro): repasse ao auditor como está.",
       "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
+      "A primeira linha `[loja: …]` diz a loja ativa do aluno: o pedido é sobre ela. Se a ficha existe (caminho relativo à pasta onde esta sessão abriu), leia-a antes de responder; se diz 'ainda sem ficha', responda normalmente e, se o pedido for sobre a loja, sugira 'começar com a loja' (vem na próxima versão).",
+      "`reply`, `deliver` e `shop_query` já vão pra loja da última mensagem; passe `project_id` só pra falar de outra loja (a lista sai no `shop_status`).",
       'Mensagens com chat_id="system" são avisos do próprio canal: repasse ao usuário no terminal, não use `reply` nelas.',
       "Só a sessão aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sessão provavelmente não é o canal: a ferramenta `status` confirma.",
     ].join("\n");
@@ -280,6 +309,7 @@ const TOOLS = DEGRADED
           properties: {
             chat_id: { type: "string", description: "O chat_id da tag <channel> recebida." },
             text: { type: "string", description: "Texto da resposta, markdown simples." },
+            project_id: { type: "string", description: "Opcional: id da loja. Sem ele, vai pra loja da última mensagem." },
           },
           required: ["chat_id", "text"],
         },
@@ -300,6 +330,7 @@ const TOOLS = DEGRADED
               description:
                 "Opcional: o JSON do bloco `## Cartão` que o agente devolveu, sem reescrever: { kind, score, summary, items: [{ title, why, effort, action }] }.",
             },
+            project_id: { type: "string", description: "Opcional: id da loja da entrega. Sem ele, a loja da última mensagem." },
           },
           required: ["title", "agent", "content"],
         },
@@ -307,18 +338,19 @@ const TOOLS = DEGRADED
       {
         name: "shop_status",
         description:
-          "Diz se a loja Shopify do aluno está conectada no Iron Office: { connected, shopDomain }. Funciona em qualquer sessão (não só no canal). Primeiro passo do agente iron-shopify.",
+          "Lista as lojas do aluno no Iron Office: { stores: [{ project_id, name, kind, shopDomain, connected }], active } (active = a loja da última mensagem do chat). Funciona em qualquer sessão (não só no canal). Primeiro passo do agente iron-shopify.",
         inputSchema: { type: "object", properties: {} },
       },
       {
         name: "shop_query",
         description:
-          "Roda uma query ou mutation GraphQL da Admin API na loja Shopify conectada no Iron Office e devolve o JSON da Shopify. As credenciais ficam no servidor; a chave do Iron Office fica com este plugin. Funciona em qualquer sessão.",
+          "Roda uma query ou mutation GraphQL da Admin API na loja Shopify conectada no Iron Office e devolve o JSON da Shopify. Leitura passa; escrita só em produtos, coleções, mídia, metacampos, arquivos, páginas, tema, publicação, descontos, traduções e metaobjetos (pedido, cliente e pagamento o Iron Office recusa). As credenciais ficam no servidor; a chave do Iron Office fica com este plugin. Funciona em qualquer sessão.",
         inputSchema: {
           type: "object",
           properties: {
             query: { type: "string", description: "A query ou mutation GraphQL (Admin API)." },
             variables: { type: "object", description: "Opcional: variáveis da query." },
+            project_id: { type: "string", description: "Opcional: id da loja (do shop_status). Sem ele, a loja da última mensagem; com 1 loja só, ela." },
           },
           required: ["query"],
         },
@@ -379,9 +411,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!body) return text("Texto vazio.", true);
     if (chatId === "system") return text("chat_id=system é aviso do canal; não precisa responder.", true);
     try {
+      const store = storeArg(args);
       await api("/api/chat/messages", {
         method: "POST",
-        body: { conversation_id: chatId || null, text: body },
+        body: { conversation_id: chatId || null, text: body, ...(store ? { meta: { project_id: store } } : {}) },
       });
       return text("Enviado ao Iron Office.");
     } catch (e) {
@@ -411,7 +444,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const res = await api("/api/deliverables", {
         method: "POST",
         // o cartão vai como veio: quem poda nos limites é o servidor
-        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...(card ? { card } : {}) },
+        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...(card ? { card } : {}), ...(storeArg(args) ? { project_id: storeArg(args) } : {}) },
       });
       const id = res?.deliverable?.id;
       if (typeof id !== "string" || !id) return text("O Iron Office não devolveu o id da entrega.", true);
@@ -425,9 +458,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   // loja: em qualquer modo (o aluno usa o iron-shopify num `claude` comum, fora do canal)
   if (name === "shop_status") {
     try {
-      const res = await api("/api/shopify/graphql");
-      if (!res?.connected) return text(`Loja não conectada: ${BASE.replace(/^https?:\/\//, "")}/integrations`);
-      return text(JSON.stringify({ connected: true, shopDomain: res.shopDomain ?? null }));
+      const res = await api("/api/shopify/graphql?stores=1");
+      // site de antes da onda 26a: devolve { connected, shopDomain } de uma loja só
+      if (!Array.isArray(res?.stores)) {
+        if (!res?.connected) return text(`Loja não conectada: ${BASE.replace(/^https?:\/\//, "")}/integrations`);
+        return text(JSON.stringify({ connected: true, shopDomain: res.shopDomain ?? null }));
+      }
+      if (res.stores.length === 0) return text(`Nenhuma loja criada ainda: ${BASE.replace(/^https?:\/\//, "")}/integrations`);
+      return text(JSON.stringify({ stores: res.stores, active: lastStoreId }));
     } catch (e) {
       return text(`Falhou ao consultar a loja: ${e.message}`, true);
     }
@@ -438,13 +476,19 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!query) return text("query é obrigatória.", true);
     const variables = args.variables && typeof args.variables === "object" && !Array.isArray(args.variables) ? args.variables : undefined;
     try {
-      const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...(variables ? { variables } : {}) } });
+      const store = storeArg(args);
+      const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...(variables ? { variables } : {}), ...(store ? { project_id: store } : {}) } });
       const out = JSON.stringify(res);
       if (out.length > SHOP_MAX) {
         return text(`${out.slice(0, SHOP_MAX)}\n[resposta cortada em ${SHOP_MAX / 1000} kB de ${Math.round(out.length / 1000)} kB: peça menos itens por vez]`);
       }
       return text(out);
     } catch (e) {
+      // 409: mais de uma loja conectada e nenhuma escolhida
+      if (e.status === 409 && Array.isArray(e.data?.stores)) {
+        const list = e.data.stores.map((x) => `${redactKeys(String(x.name ?? ""), 80).text} (project_id ${x.project_id})`).join(", ");
+        return text(`Mais de uma loja conectada: diga qual loja (passe project_id): ${list}.`, true);
+      }
       return text(`Falhou a consulta na loja: ${e.message}`, true);
     }
   }
@@ -489,7 +533,9 @@ async function pullOnce() {
       toAck.push(m.id);
       continue;
     }
-    const ok = await notify(content, {
+    // 0.7.0: a loja ativa do aluno vai na 1ª linha; sem loja (mensagem de antes da onda 26a), o texto vai puro
+    const store = m.store && typeof m.store === "object" && typeof m.store.id === "string" ? m.store : null;
+    const ok = await notify(`${storePrefix(store)}${content}`, {
       chat_id: typeof m.conversation_id === "string" && m.conversation_id ? m.conversation_id : DEFAULT_CONVERSATION,
       message_id: m.id,
       user: "aluno",
@@ -498,6 +544,7 @@ async function pullOnce() {
     if (ok) {
       remember(m.id);
       toAck.push(m.id);
+      lastStoreId = store && UUID_RE.test(store.id) ? store.id : null;
     }
   }
   if (toAck.length > 0) {
