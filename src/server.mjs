@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -197,7 +197,8 @@ const state = {
 let lastStoreId = null;
 const KIND_LABEL = { shopify: "Loja Shopify", cliente: "Cliente", negocio: "Negócio sem loja" };
 
-// "[loja: Vulkan · Loja Shopify · ficha: Lojas/vulkan/ficha.md]" — nome e caminho passam pelo filtro de segredos
+// "[loja: Vulkan · Loja Shopify · id: <uuid> · ficha: Lojas/vulkan/ficha.md]" — nome e caminho passam pelo filtro de
+// segredos. 0.7.1 (onda 26c): o id vai junto, pro modelo escrever na loja da mensagem sem precisar do shop_status.
 function storePrefix(store) {
   if (!store || typeof store !== "object" || typeof store.id !== "string") return "";
   const name = redactKeys(String(store.name ?? "").replace(/[\r\n\]]/g, " ").trim(), 80).text || "sem nome";
@@ -205,7 +206,8 @@ function storePrefix(store) {
   const path = typeof store.ficha_path === "string" && store.ficha_path.trim()
     ? redactKeys(store.ficha_path.replace(/[\r\n\]]/g, " ").trim(), 200).text
     : "ainda sem ficha";
-  return `[loja: ${name} · ${kind} · ficha: ${path}]\n`;
+  const id = UUID_RE.test(store.id) ? ` · id: ${store.id}` : "";
+  return `[loja: ${name} · ${kind}${id} · ficha: ${path}]\n`;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -286,7 +288,9 @@ const INSTRUCTIONS = DEGRADED
       "Pedido `usa o iron-auditor:` traz `dono=sim|nao` (o site é do aluno ou de terceiro): repasse ao auditor como está.",
       "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
       "A primeira linha `[loja: …]` diz a loja ativa do aluno: o pedido é sobre ela. Se a ficha existe (caminho relativo à pasta onde esta sessão abriu), leia-a antes de responder; se diz 'ainda sem ficha', responda normalmente, sem prometer ficha.",
-      "`reply`, `deliver` e as LEITURAS do `shop_query` vão pra loja da última mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (pegue no `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
+      "`reply`, `deliver` e as LEITURAS do `shop_query` vão pra loja da última mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: …]`, ou o `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
+      "Cancelar pedido, nota e etiquetas de pedido passam por confirmação do aluno no site: mande a mutation normalmente pelo `shop_query` com o `project_id`; o site responde que ficou pendente e aparece um cartão no chat. Estorno, pagamento, cliente e endereço não passam.",
+      'Mensagem com user="sistema" é o site avisando o resultado de uma ação confirmada pelo aluno: responda em 1 linha no chat (ex.: "Pronto, cancelei o #1001."), não execute nada.',
       'Mensagens com chat_id="system" são avisos do próprio canal: repasse ao usuário no terminal, não use `reply` nelas.',
       "Só a sessão aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sessão provavelmente não é o canal: a ferramenta `status` confirma.",
     ].join("\n");
@@ -488,6 +492,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const store = isMutation(query) ? explicitStore(args) : storeArg(args);
       const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...(variables ? { variables } : {}), ...(store ? { project_id: store } : {}) } });
+      // 0.7.1 (onda 26c): ação de pedido não roda aqui; o site guardou e o aluno confirma no cartão
+      if (res && res.pending === true) {
+        const summary = redactKeys(String(res.summary ?? ""), 300).text;
+        return text(`Ação pendente de confirmação no site (vale 10 min): ${summary}. Apareceu um cartão no chat do aluno; diga pra ele confirmar lá e NÃO repita a mutation.`);
+      }
       const out = JSON.stringify(res);
       if (out.length > SHOP_MAX) {
         return text(`${out.slice(0, SHOP_MAX)}\n[resposta cortada em ${SHOP_MAX / 1000} kB de ${Math.round(out.length / 1000)} kB: peça menos itens por vez]`);
@@ -497,6 +506,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       // 409: mais de uma loja conectada e nenhuma escolhida
       if (e.status === 409 && Array.isArray(e.data?.stores)) {
         const list = e.data.stores.map((x) => `${redactKeys(String(x.name ?? ""), 80).text} (project_id ${x.project_id})`).join(", ");
+        if (/^Ação de pedido/.test(String(e.data.error ?? ""))) return text(`Ação de pedido precisa da loja: passe o project_id: ${list}.`, true);
         return text(`Mais de uma loja conectada: diga qual loja (passe project_id): ${list}.`, true);
       }
       return text(`Falhou a consulta na loja: ${e.message}`, true);
@@ -545,10 +555,12 @@ async function pullOnce() {
     }
     // 0.7.0: a loja ativa do aluno vai na 1ª linha; sem loja (mensagem de antes da onda 26a), o texto vai puro
     const store = m.store && typeof m.store === "object" && typeof m.store.id === "string" ? m.store : null;
-    const ok = await notify(`${storePrefix(store)}${content}`, {
+    // 0.7.1: aviso do site depois do clique numa ação de pedido: entra como user="sistema", sem o prefixo de loja
+    const system = m.meta && typeof m.meta === "object" && m.meta.system === "action";
+    const ok = await notify(system ? content : `${storePrefix(store)}${content}`, {
       chat_id: typeof m.conversation_id === "string" && m.conversation_id ? m.conversation_id : DEFAULT_CONVERSATION,
       message_id: m.id,
-      user: "aluno",
+      user: system ? "sistema" : "aluno",
       ts: typeof m.created_at === "string" && m.created_at ? m.created_at : new Date().toISOString(),
     });
     if (ok) {

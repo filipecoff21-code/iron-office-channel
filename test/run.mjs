@@ -772,7 +772,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.handshake();
   await sleep(2500);
   const n1 = notifs(s.out)[0]?.msg.params.content ?? "";
-  check("prefixo [loja: nome · tipo · ficha: ainda sem ficha] na 1ª linha", n1.startsWith("[loja: Vulkan ") && n1.includes(" · Loja Shopify · ficha: ainda sem ficha]\nem qual loja estamos?"), JSON.stringify(n1));
+  check("prefixo [loja: nome · tipo · id · ficha: ainda sem ficha] na 1ª linha (0.7.1: com o id)", n1.startsWith("[loja: Vulkan ") && n1.includes(` · Loja Shopify · id: ${LOJA} · ficha: ainda sem ficha]\nem qual loja estamos?`), JSON.stringify(n1));
   check("nome da loja passa pelo filtro de segredos", !n1.includes("iok_" + "b".repeat(48)), JSON.stringify(n1));
   call(s, 2, "reply", { chat_id: "c1", text: "Estamos na Vulkan." });
   call(s, 3, "deliver", { title: "T", agent: "iron-ceo", content: "C" });
@@ -815,6 +815,43 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(500);
   try { st = JSON.parse(txt(s, 11)); } catch { st = {}; }
   check("shop_status com 2 lojas: lista as 2, active null", st.stores?.length === 2 && st.active === null, txt(s, 11));
+  s.p.kill();
+  f.srv.close();
+}
+
+// ─── 15. ação de pedido com confirmação (0.7.1, onda 26c) ─────────────────
+{
+  console.log("ação de pedido (0.7.1)");
+  const LOJA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const fila = [
+    { id: "a1", conversation_id: "c1", content: "[sistema] Cancelar o pedido #1001 · sem estorno → executada", meta: { system: "action", action_id: "x", project_id: LOJA }, created_at: "2026-10-28T00:00:00Z",
+      store: { id: LOJA, name: "Vulkan", kind: "shopify", slug: "vulkan", ficha_path: null } },
+  ];
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: fila.splice(0, 1) } };
+    if (c.path === "/api/shopify/graphql" && c.method === "POST" && /orderCancel/.test(c.body.query) && !c.body.project_id) {
+      return { status: 409, json: { error: "Ação de pedido precisa da loja: passe o project_id.", stores: [{ project_id: LOJA, name: "Vulkan" }] } };
+    }
+    if (c.path === "/api/shopify/graphql" && c.method === "POST" && /orderCancel/.test(c.body.query)) {
+      return { status: 202, json: { pending: true, action_id: "x", summary: "Cancelar o pedido #1001 · 189.000 COP · sem estorno iok_" + "c".repeat(48), expires_at: "2026-10-28T00:10:00Z" } };
+    }
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const txt = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result?.content?.[0]?.text ?? "";
+  const isErr = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result?.isError === true;
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(2500);
+  const n = notifs(s.out)[0]?.msg.params ?? {};
+  check("aviso do site entra como user=sistema, sem prefixo de loja", n.meta?.user === "sistema" && n.content === "[sistema] Cancelar o pedido #1001 · sem estorno → executada", JSON.stringify(n));
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
+  check("instrução: user=sistema responde em 1 linha e não executa; ação de pedido passa por confirmação", /user="sistema"/.test(init) && /não execute nada/.test(init) && /confirmação do aluno no site/.test(init), init.slice(-600));
+  call(s, 2, "shop_query", { query: `mutation { orderCancel(orderId: "gid://shopify/Order/1", reason: CUSTOMER, restock: false) { job { id } } }`, project_id: LOJA });
+  call(s, 3, "shop_query", { query: `mutation { orderCancel(orderId: "gid://shopify/Order/1") { job { id } } }` });
+  await sleep(800);
+  check("202 vira 'Ação pendente de confirmação… NÃO repita a mutation'", !isErr(s, 2) && /^Ação pendente de confirmação no site \(vale 10 min\): Cancelar o pedido #1001/.test(txt(s, 2)) && /NÃO repita a mutation/.test(txt(s, 2)), txt(s, 2));
+  check("resumo da ação passa pelo filtro de segredos", !txt(s, 2).includes("iok_" + "c".repeat(48)), txt(s, 2));
+  check("ação sem project_id: 409 vira 'precisa da loja: passe o project_id'", isErr(s, 3) && /Ação de pedido precisa da loja/.test(txt(s, 3)) && txt(s, 3).includes(LOJA), txt(s, 3));
   s.p.kill();
   f.srv.close();
 }

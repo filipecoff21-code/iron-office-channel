@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.7.0";
+var VERSION = "0.7.1";
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17180,7 +17180,8 @@ function storePrefix(store) {
   const name = redactKeys(String(store.name ?? "").replace(/[\r\n\]]/g, " ").trim(), 80).text || "sem nome";
   const kind = KIND_LABEL[store.kind] ?? "Loja";
   const path = typeof store.ficha_path === "string" && store.ficha_path.trim() ? redactKeys(store.ficha_path.replace(/[\r\n\]]/g, " ").trim(), 200).text : "ainda sem ficha";
-  return `[loja: ${name} \xB7 ${kind} \xB7 ficha: ${path}]
+  const id = UUID_RE.test(store.id) ? ` \xB7 id: ${store.id}` : "";
+  return `[loja: ${name} \xB7 ${kind}${id} \xB7 ficha: ${path}]
 `;
 }
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17248,7 +17249,9 @@ var INSTRUCTIONS = DEGRADED ? [
   "Pedido `usa o iron-auditor:` traz `dono=sim|nao` (o site \xE9 do aluno ou de terceiro): repasse ao auditor como est\xE1.",
   "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
   "A primeira linha `[loja: \u2026]` diz a loja ativa do aluno: o pedido \xE9 sobre ela. Se a ficha existe (caminho relativo \xE0 pasta onde esta sess\xE3o abriu), leia-a antes de responder; se diz 'ainda sem ficha', responda normalmente, sem prometer ficha.",
-  "`reply`, `deliver` e as LEITURAS do `shop_query` v\xE3o pra loja da \xFAltima mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (pegue no `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
+  "`reply`, `deliver` e as LEITURAS do `shop_query` v\xE3o pra loja da \xFAltima mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: \u2026]`, ou o `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
+  "Cancelar pedido, nota e etiquetas de pedido passam por confirma\xE7\xE3o do aluno no site: mande a mutation normalmente pelo `shop_query` com o `project_id`; o site responde que ficou pendente e aparece um cart\xE3o no chat. Estorno, pagamento, cliente e endere\xE7o n\xE3o passam.",
+  'Mensagem com user="sistema" \xE9 o site avisando o resultado de uma a\xE7\xE3o confirmada pelo aluno: responda em 1 linha no chat (ex.: "Pronto, cancelei o #1001."), n\xE3o execute nada.',
   'Mensagens com chat_id="system" s\xE3o avisos do pr\xF3prio canal: repasse ao usu\xE1rio no terminal, n\xE3o use `reply` nelas.',
   "S\xF3 a sess\xE3o aberta com `npx iron-edge office` recebe mensagens do site. Se nenhuma tag <channel> chegou, esta sess\xE3o provavelmente n\xE3o \xE9 o canal: a ferramenta `status` confirma."
 ].join("\n");
@@ -17431,6 +17434,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const store = isMutation(query) ? explicitStore(args) : storeArg(args);
       const res = await api("/api/shopify/graphql", { method: "POST", body: { query, ...variables ? { variables } : {}, ...store ? { project_id: store } : {} } });
+      if (res && res.pending === true) {
+        const summary = redactKeys(String(res.summary ?? ""), 300).text;
+        return text(`A\xE7\xE3o pendente de confirma\xE7\xE3o no site (vale 10 min): ${summary}. Apareceu um cart\xE3o no chat do aluno; diga pra ele confirmar l\xE1 e N\xC3O repita a mutation.`);
+      }
       const out = JSON.stringify(res);
       if (out.length > SHOP_MAX) {
         return text(`${out.slice(0, SHOP_MAX)}
@@ -17440,6 +17447,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     } catch (e) {
       if (e.status === 409 && Array.isArray(e.data?.stores)) {
         const list = e.data.stores.map((x) => `${redactKeys(String(x.name ?? ""), 80).text} (project_id ${x.project_id})`).join(", ");
+        if (/^Ação de pedido/.test(String(e.data.error ?? ""))) return text(`A\xE7\xE3o de pedido precisa da loja: passe o project_id: ${list}.`, true);
         return text(`Mais de uma loja conectada: diga qual loja (passe project_id): ${list}.`, true);
       }
       return text(`Falhou a consulta na loja: ${e.message}`, true);
@@ -17478,10 +17486,11 @@ async function pullOnce() {
       continue;
     }
     const store = m.store && typeof m.store === "object" && typeof m.store.id === "string" ? m.store : null;
-    const ok = await notify(`${storePrefix(store)}${content}`, {
+    const system = m.meta && typeof m.meta === "object" && m.meta.system === "action";
+    const ok = await notify(system ? content : `${storePrefix(store)}${content}`, {
       chat_id: typeof m.conversation_id === "string" && m.conversation_id ? m.conversation_id : DEFAULT_CONVERSATION,
       message_id: m.id,
-      user: "aluno",
+      user: system ? "sistema" : "aluno",
       ts: typeof m.created_at === "string" && m.created_at ? m.created_at : (/* @__PURE__ */ new Date()).toISOString()
     });
     if (ok) {
