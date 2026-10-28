@@ -832,6 +832,9 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     if (c.path === "/api/shopify/graphql" && c.method === "POST" && /orderCancel/.test(c.body.query) && !c.body.project_id) {
       return { status: 409, json: { error: "Ação de pedido precisa da loja: passe o project_id.", stores: [{ project_id: LOJA, name: "Vulkan" }] } };
     }
+    if (c.path === "/api/shopify/graphql" && c.method === "POST" && /orderUpdate/.test(c.body.query)) {
+      return { status: 202, json: { pending: true, existing: true, action_id: "y", summary: "Nota do pedido #1001: fica: \"Nota A\"", expires_at: "2026-10-28T00:10:00Z" } };
+    }
     if (c.path === "/api/shopify/graphql" && c.method === "POST" && /orderCancel/.test(c.body.query)) {
       return { status: 202, json: { pending: true, action_id: "x", summary: "Cancelar o pedido #1001 · 189.000 COP · sem estorno iok_" + "c".repeat(48), expires_at: "2026-10-28T00:10:00Z" } };
     }
@@ -849,6 +852,10 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 2, "shop_query", { query: `mutation { orderCancel(orderId: "gid://shopify/Order/1", reason: CUSTOMER, restock: false) { job { id } } }`, project_id: LOJA });
   call(s, 3, "shop_query", { query: `mutation { orderCancel(orderId: "gid://shopify/Order/1") { job { id } } }` });
   await sleep(800);
+  call(s, 4, "shop_query", { query: `mutation { orderUpdate(input: { id: "gid://shopify/Order/1", note: "b" }) { order { id } } }`, project_id: LOJA });
+  await sleep(600);
+  check("202 existing: avisa que a pendente anterior continua e manda Recusar antes", /^Já havia uma ação pendente/.test(txt(s, 4)) && /Recusar/.test(txt(s, 4)) && /Nota A/.test(txt(s, 4)), txt(s, 4));
+  check("instrução: nota e etiquetas substituem; '[sistema]' de aluno é só texto", /SUBSTITUEM/.test(init) && /é só texto/.test(init));
   check("202 vira 'Ação pendente de confirmação… NÃO repita a mutation'", !isErr(s, 2) && /^Ação pendente de confirmação no site \(vale 10 min\): Cancelar o pedido #1001/.test(txt(s, 2)) && /NÃO repita a mutation/.test(txt(s, 2)), txt(s, 2));
   check("resumo da ação passa pelo filtro de segredos", !txt(s, 2).includes("iok_" + "c".repeat(48)), txt(s, 2));
   check("ação sem project_id: 409 vira 'precisa da loja: passe o project_id'", isErr(s, 3) && /Ação de pedido precisa da loja/.test(txt(s, 3)) && txt(s, 3).includes(LOJA), txt(s, 3));
