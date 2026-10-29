@@ -931,6 +931,104 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   f.srv.close();
 }
 
+// ─── 17. trilha e perguntas (0.8.0, onda 27a) ─────────────────────────────
+{
+  console.log("trilha e perguntas (0.8.0)");
+  const LOJA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const OUTRA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const TRILHA = { path: "tem_loja", progress: { done: 2, total: 13, next: "marca" }, steps: [{ id: "loja", status: "provada", derived: true }] };
+  const fila = [
+    { id: "t1", conversation_id: "c1", content: "trilha: idioma", meta: { project_id: LOJA }, created_at: "2026-10-30T00:00:00Z",
+      store: { id: LOJA, name: "Loja Exemplo", kind: "shopify", ficha_path: "Projetos/loja-exemplo/PROJETO.md", trail_done: 4, trail_path: "tem_loja" } },
+    { id: "t2", conversation_id: "c1", content: "oi", meta: { project_id: OUTRA }, created_at: "2026-10-30T00:00:01Z",
+      store: { id: OUTRA, name: "Nova", kind: "negocio", ficha_path: null, trail_done: 1, trail_path: "sem_loja" } },
+    { id: "t3", conversation_id: "c1", content: "e ai", meta: { project_id: LOJA }, created_at: "2026-10-30T00:00:02Z",
+      store: { id: LOJA, name: "Antiga", kind: "shopify", ficha_path: null } },
+  ];
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: fila.splice(0, 1) } };
+    if (c.path === "/api/chat/messages" && c.method === "POST") return { json: { id: "m-1" } };
+    if (c.path === `/api/stores/${LOJA}/trail` && c.method === "GET") return { json: TRILHA };
+    if (c.path === `/api/stores/${LOJA}/trail` && c.method === "POST") return { json: { ok: true, ...TRILHA } };
+    if (c.path === `/api/stores/${OUTRA}/trail`) return { status: 404, json: { error: "Loja não encontrada." } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+  const err = (s, id) => res(s, id)?.isError === true;
+
+  // fora do canal: as 3 recusam sem chamar o site
+  const p = startServer(casa(), f.url, {});
+  p.handshake();
+  await sleep(1500);
+  call(p, 2, "ask", { chat_id: "c1", question: "Como paga?", options: ["Na entrega"] });
+  call(p, 3, "trail_status", { project_id: LOJA });
+  call(p, 4, "trail_update", { project_id: LOJA, step: "idioma", status: "em_andamento" });
+  await sleep(600);
+  check("ask/trail_status/trail_update fora do canal: recusam sem chamar o site", err(p, 2) && err(p, 3) && err(p, 4) && !f.calls.some((c) => c.path.includes("/trail") || c.path === "/api/chat/messages"), [2, 3, 4].map((i) => txt(p, i)).join(" | "));
+  const ins = p.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
+  check("instrução: trilha pela skill, trail_status antes, nunca provada sem prova", /`trilha: <etapa>`/.test(ins) && /trail_status` antes de agir/.test(ins) && /nunca marque `provada` sem a prova medida/.test(ins));
+  check("instrução: UMA pergunta por mensagem pela `ask`; cartão acima em 1 linha", /UMA por mensagem, pela ferramenta `ask`/.test(ins) && /nunca mande lista de perguntas/.test(ins) && /confirme no cartão acima/.test(ins) && /confirmação do aluno no site/.test(ins));
+  p.p.kill();
+
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(6500);
+  const ns = notifs(s.out).map((n) => n.msg.params.content);
+  check("prefixo com 'trilha: 4 feitas'", /\[loja: Loja Exemplo · Loja Shopify · id: [^\]]+ · ficha: Projetos\/loja-exemplo\/PROJETO\.md · trilha: 4 feitas\]\ntrilha: idioma$/.test(ns[0] ?? ""), JSON.stringify(ns[0]));
+  check("prefixo sem_loja: 'trilha: 1 feita · caminho: criar a loja'", /· trilha: 1 feita · caminho: criar a loja\]\noi$/.test(ns[1] ?? ""), JSON.stringify(ns[1]));
+  check("prefixo sem trail_done (site antigo): sem 'trilha'", /ficha: ainda sem ficha\]\ne ai$/.test(ns[2] ?? ""), JSON.stringify(ns[2]));
+
+  // ask: tamanhos e recusas
+  call(s, 10, "ask", { chat_id: "c1", question: "Como o cliente paga?", options: ["Na entrega", { id: "cartao", label: "Cartão na loja" }, { id: "cartao", label: "Os dois" }], skip: true, project_id: LOJA });
+  call(s, 11, "ask", { chat_id: "c1", question: "x", options: Array.from({ length: 50 }, (_, i) => `op ${i}`) });
+  call(s, 12, "ask", { chat_id: "c1", question: "q".repeat(301), options: ["a"] });
+  call(s, 13, "ask", { chat_id: "c1", question: "Qual?", options: ["l".repeat(61)] });
+  call(s, 14, "ask", { chat_id: "c1", question: "Qual?" });
+  call(s, 15, "ask", { chat_id: "c1", question: "Canais?", free: true });
+  call(s, 16, "ask", { chat_id: "system", question: "x", options: ["a"] });
+  call(s, 17, "ask", { chat_id: "c1", question: "Chave iok_" + "e".repeat(48) + "?", options: ["ok"] });
+  await sleep(1000);
+  const asks = f.calls.filter((c) => c.path === "/api/chat/messages").map((c) => c.body);
+  const q0 = asks[0]?.meta?.question ?? {};
+  check("ask: manda text = pergunta e meta.question { text, options [{id,label}], free, skip } com project_id", asks[0]?.text === "Como o cliente paga?" && q0.text === "Como o cliente paga?" && q0.skip === true && q0.free === false && asks[0]?.meta?.project_id === LOJA && q0.options?.length === 3, JSON.stringify(asks[0]));
+  check("ask: opção sem id ganha o1..; id repetido vira o posicional", JSON.stringify(q0.options?.map((o) => o.id)) === JSON.stringify(["o1", "cartao", "o3"]), JSON.stringify(q0.options));
+  check("ask: 50 opções, pergunta > 300, opção > 60, sem opção e sem free, chat system → recusadas", [11, 12, 13, 14, 16].every((i) => err(s, i)) && /Opções demais \(50; máximo 6\)/.test(txt(s, 11)), [11, 12, 13, 14, 16].map((i) => txt(s, i)).join(" | "));
+  check("ask: só free (sem opções) passa", !err(s, 15) && asks.some((b) => b.meta?.question?.free === true && b.meta.question.options.length === 0));
+  check("ask: segredo na pergunta não sai", asks.every((b) => !JSON.stringify(b).includes("e".repeat(48))));
+  check("ask: só as 3 válidas chegam ao site", asks.length === 3, String(asks.length));
+
+  // trail_status / trail_update
+  call(s, 20, "trail_status", { project_id: LOJA });
+  call(s, 21, "trail_status", { project_id: OUTRA });
+  call(s, 22, "trail_update", { project_id: LOJA, step: "idioma", status: "provada" });
+  call(s, 23, "trail_update", { project_id: LOJA, step: "idioma", status: "provada", proof: {} });
+  call(s, 24, "trail_update", { project_id: LOJA, step: "obrigado", status: "pulada" });
+  call(s, 25, "trail_update", { project_id: LOJA, step: "Idioma!", status: "provada", proof: { a: 1 } });
+  call(s, 26, "trail_update", { project_id: LOJA, step: "idioma", status: "aprovada" });
+  call(s, 27, "trail_update", { step: "idioma", status: "em_andamento" });
+  call(s, 28, "trail_update", { project_id: LOJA, step: "midias", status: "provada", proof: { fora: ["x".repeat(2100)] } });
+  await sleep(800);
+  call(s, 29, "trail_update", { project_id: LOJA, step: "idioma", status: "provada", proof: { primary: "es", market: "CO", contato: "ana@exemplo.com (32) 98457-7529", token: "iok_" + "f".repeat(48), lista: [{ dono: "joao@x.com" }] }, path: "tem_loja" });
+  call(s, 30, "trail_update", { project_id: LOJA, step: "obrigado", status: "pulada", note: "não vendo em COD" });
+  call(s, 31, "trail_update", { project_id: OUTRA, step: "idioma", status: "em_andamento" });
+  await sleep(1000);
+  check("trail_status: GET /api/stores/<id>/trail e devolve o JSON", f.calls.some((c) => c.method === "GET" && c.path === `/api/stores/${LOJA}/trail`) && /"next":"marca"/.test(txt(s, 20)), txt(s, 20));
+  check("trail_status de outra conta: 404 vira 'Loja não encontrada nesta conta'", err(s, 21) && /Loja não encontrada nesta conta/.test(txt(s, 21)));
+  check("trail_update: provada sem proof / proof vazio → recusa", err(s, 22) && err(s, 23) && /exige `proof`/.test(txt(s, 22)));
+  check("trail_update: pulada sem note, step inválido, status inválido, sem project_id, proof > 2000 → recusa", [24, 25, 26, 27, 28].every((i) => err(s, i)) && /proof grande demais/.test(txt(s, 28)), [24, 25, 26, 27, 28].map((i) => txt(s, i)).join(" | "));
+  const posts = f.calls.filter((c) => c.method === "POST" && c.path.endsWith("/trail")).map((c) => c.body);
+  check("trail_update: só as válidas chegam ao site (3)", posts.length === 3, JSON.stringify(posts).slice(0, 300));
+  const pv = posts[0] ?? {};
+  check("trail_update: corpo { step, status, proof, path }", pv.step === "idioma" && pv.status === "provada" && pv.proof?.primary === "es" && pv.proof?.market === "CO" && pv.path === "tem_loja", JSON.stringify(pv));
+  check("trail_update: e-mail, telefone e chave saem da prova (até dentro de lista)", !/@|98457|f{48}/.test(JSON.stringify(pv.proof)), JSON.stringify(pv.proof));
+  check("trail_update: pulada leva a note", posts[1]?.status === "pulada" && posts[1]?.note === "não vendo em COD", JSON.stringify(posts[1]));
+  check("trail_update: resposta { ok, path, progress }", /"ok":true/.test(txt(s, 29)) && /"next":"marca"/.test(txt(s, 29)), txt(s, 29));
+  check("trail_update de outra conta: 404 vira 'Loja não encontrada nesta conta'", err(s, 31) && /Loja não encontrada nesta conta/.test(txt(s, 31)));
+  s.p.kill();
+  f.srv.close();
+}
+
 for (const d of lixo) {
   try {
     rmSync(d, { recursive: true, force: true });
