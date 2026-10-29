@@ -867,8 +867,12 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 {
   console.log("ficha da loja (0.7.2)");
   const LOJA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const fila = [
+    { id: "f1", conversation_id: "c1", content: "oi", meta: { project_id: LOJA }, created_at: "2026-10-29T00:00:00Z", store: { id: LOJA, name: "Loja Exemplo", kind: "shopify", ficha_path: "~/.ssh/id_rsa" } },
+    { id: "f2", conversation_id: "c1", content: "oi de novo", meta: { project_id: LOJA }, created_at: "2026-10-29T00:00:01Z", store: { id: LOJA, name: "Loja Exemplo", kind: "shopify", ficha_path: "Projetos/loja-exemplo/PROJETO.md" } },
+  ];
   const f = await fakeOffice((c) => {
-    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: fila.splice(0, 1) } };
     if (c.path === `/api/stores/${LOJA}/ficha` && c.method === "POST") return { json: { ok: true, ficha_updated_at: "2026-10-29T00:00:00Z" } };
     if (c.path.startsWith("/api/stores/") && c.method === "POST") return { status: 404, json: { error: "Loja não encontrada." } };
   });
@@ -890,7 +894,9 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 
   const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
   s.handshake();
-  await sleep(2500);
+  await sleep(4500);
+  const ns = notifs(s.out).map((n) => n.msg.params.content);
+  check("prefixo: ficha_path fora da regra (~) vira 'ainda sem ficha'; o relativo passa", /ficha: ainda sem ficha\]\noi$/.test(ns[0] ?? "") && /ficha: Projetos\/loja-exemplo\/PROJETO\.md\]\noi de novo$/.test(ns[1] ?? ""), JSON.stringify(ns));
   for (const [i, bad] of [["..", "Projetos/../../etc/passwd"], ["abs", "/Users/x/cofre/PROJETO.md"], ["drive", "C:/cofre/PROJETO.md"], ["til", "~/cofre/PROJETO.md"], ["vazio", ""], ["backslash ..", "Projetos\\..\\x.md"]].entries()) {
     call(s, 10 + i, "store_update", { project_id: LOJA, ficha_path: bad[1], summary: "x" });
   }
@@ -907,6 +913,17 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const body = f.calls.find((c) => c.path === `/api/stores/${LOJA}/ficha`)?.body ?? {};
   check("store_update: corpo enviado (caminho, moeda, país, domínio) e resposta { ok, ficha_updated_at }", body.ficha_path === "Projetos/loja-exemplo/PROJETO.md" && body.currency === "BRL" && body.country === "BR" && body.domain === "loja-exemplo.com.br" && /"ok":true/.test(txt(s, 21)) && /2026-10-29/.test(txt(s, 21)), JSON.stringify(body).slice(0, 200) + " " + txt(s, 21));
   check("store_update: resumo cortado em 600 e sem segredo", typeof body.summary === "string" && body.summary.length <= 600 && !body.summary.includes("d".repeat(48)), String(body.summary?.length));
+  // gate r1 B2: resumo ausente ou vazio não vai (o site mantém o que estava)
+  call(s, 23, "store_update", { project_id: LOJA, ficha_path: "Projetos/loja-exemplo/PROJETO.md" });
+  call(s, 24, "store_update", { project_id: LOJA, ficha_path: "Projetos/loja-exemplo/PROJETO.md", summary: "   " });
+  // contato e pedido saem do resumo; preço com ponto fica; moeda/país no limite do banco
+  call(s, 25, "store_update", { project_id: LOJA, ficha_path: "Projetos/loja-exemplo/PROJETO.md", summary: "Botas · ticket 1.250.000 COP · sócio joao@exemplo.com (32) 98457-7529 +57 300 1234567 pedido #1008", currency: "COP-LONGO", country: "Colombia do Sul" });
+  await sleep(900);
+  const fichas = f.calls.filter((c) => c.path === `/api/stores/${LOJA}/ficha`).map((c) => c.body);
+  check("store_update: resumo ausente ou só espaço não vai no corpo", fichas.length >= 3 && !("summary" in fichas[1]) && !("summary" in fichas[2]), JSON.stringify(fichas.slice(1, 3)));
+  const sc = fichas[3]?.summary ?? "";
+  check("store_update: e-mail, telefone e #pedido viram [removido]; preço com ponto fica", !/@|98457|1234567|#1008/.test(sc) && /1\.250\.000 COP/.test(sc) && (sc.match(/\[removido\]/g) || []).length === 4, sc);
+  check("store_update: moeda e país cortados em 8", fichas[3]?.currency === "COP-LONG" && fichas[3]?.country === "Colombia", JSON.stringify(fichas[3]));
   call(s, 22, "store_update", { project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ficha_path: "Projetos/x/PROJETO.md", summary: "x" });
   await sleep(600);
   check("store_update: loja de outra conta (404) vira 'Loja não encontrada nesta conta'", res(s, 22)?.isError === true && /Loja não encontrada nesta conta/.test(txt(s, 22)), txt(s, 22));
