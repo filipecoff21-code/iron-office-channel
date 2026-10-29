@@ -863,6 +863,57 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   f.srv.close();
 }
 
+// ─── 16. ficha da loja (0.7.2, onda 26b) ─────────────────────────────────
+{
+  console.log("ficha da loja (0.7.2)");
+  const LOJA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === `/api/stores/${LOJA}/ficha` && c.method === "POST") return { json: { ok: true, ficha_updated_at: "2026-10-29T00:00:00Z" } };
+    if (c.path.startsWith("/api/stores/") && c.method === "POST") return { status: 404, json: { error: "Loja não encontrada." } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+
+  // fora do canal (sessão comum): não grava
+  const p = startServer(casa(), f.url, {});
+  p.handshake();
+  await sleep(1500);
+  call(p, 2, "store_update", { project_id: LOJA, ficha_path: "Projetos/loja-exemplo/PROJETO.md", summary: "x" });
+  await sleep(500);
+  check("store_update fora do canal: recusa sem chamar o site", res(p, 2)?.isError === true && !f.calls.some((c) => c.path.includes("/ficha")), txt(p, 2));
+  const ins = p.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
+  check("instrução: 'ainda sem ficha' → oferecer a skill loja e esperar o sim", /ainda sem ficha` e o pedido é sobre a loja, ofereça em 1 linha montar a ficha \(skill `loja`\) e espere o sim/.test(ins));
+  check("instrução: recusada/venceu → 1 linha e NÃO propor de novo", /recusada pelo aluno/.test(ins) && /venceu sem confirmação/.test(ins) && /NÃO proponha a mesma ação de novo/.test(ins));
+  p.p.kill();
+
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(2500);
+  for (const [i, bad] of [["..", "Projetos/../../etc/passwd"], ["abs", "/Users/x/cofre/PROJETO.md"], ["drive", "C:/cofre/PROJETO.md"], ["til", "~/cofre/PROJETO.md"], ["vazio", ""], ["backslash ..", "Projetos\\..\\x.md"]].entries()) {
+    call(s, 10 + i, "store_update", { project_id: LOJA, ficha_path: bad[1], summary: "x" });
+  }
+  call(s, 20, "store_update", { project_id: "nao-e-uuid", ficha_path: "Projetos/a/PROJETO.md" });
+  await sleep(800);
+  let recusas = true;
+  for (let i = 0; i < 6; i++) if (res(s, 10 + i)?.isError !== true) recusas = false;
+  check("store_update: '..', absoluto, unidade, ~, vazio e \\.. recusados no plugin (sem chamar o site)", recusas && !f.calls.some((c) => c.path.includes("/ficha")), [0, 1, 2, 3, 4, 5].map((i) => txt(s, 10 + i)).join(" | "));
+  check("store_update: project_id que não é uuid recusado", res(s, 20)?.isError === true);
+
+  const longo = "Moda praia · " + "a".repeat(700) + " iok_" + "d".repeat(48);
+  call(s, 21, "store_update", { project_id: LOJA, ficha_path: "Projetos/loja-exemplo/PROJETO.md", summary: longo, domain: "loja-exemplo.com.br", currency: "BRL", country: "BR" });
+  await sleep(800);
+  const body = f.calls.find((c) => c.path === `/api/stores/${LOJA}/ficha`)?.body ?? {};
+  check("store_update: corpo enviado (caminho, moeda, país, domínio) e resposta { ok, ficha_updated_at }", body.ficha_path === "Projetos/loja-exemplo/PROJETO.md" && body.currency === "BRL" && body.country === "BR" && body.domain === "loja-exemplo.com.br" && /"ok":true/.test(txt(s, 21)) && /2026-10-29/.test(txt(s, 21)), JSON.stringify(body).slice(0, 200) + " " + txt(s, 21));
+  check("store_update: resumo cortado em 600 e sem segredo", typeof body.summary === "string" && body.summary.length <= 600 && !body.summary.includes("d".repeat(48)), String(body.summary?.length));
+  call(s, 22, "store_update", { project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ficha_path: "Projetos/x/PROJETO.md", summary: "x" });
+  await sleep(600);
+  check("store_update: loja de outra conta (404) vira 'Loja não encontrada nesta conta'", res(s, 22)?.isError === true && /Loja não encontrada nesta conta/.test(txt(s, 22)), txt(s, 22));
+  s.p.kill();
+  f.srv.close();
+}
+
 for (const d of lixo) {
   try {
     rmSync(d, { recursive: true, force: true });
