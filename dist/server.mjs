@@ -17192,16 +17192,31 @@ var BAD_FICHA_PATH = /^[\/~]|^[A-Za-z]:|(^|\/)\.\.(\/|$)|[\u0000-\u001f\u007f]/;
 function scrubSummary(s) {
   return s.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "[removido]").replace(/(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g, "[removido]").replace(/#\d{3,}/g, "[removido]");
 }
+var PROOF_DEPTH = 4;
+var PROOF_ITEMS = 50;
+var PROOF_KEYS = 30;
+var EMAIL_RE = /[\w.+-]+@[\w-]+(\.[\w-]+)+/g;
+var PHONE_RE = /(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g;
+function scrubProofText(s) {
+  const t = redactKeys(s, PROOF_MAX).text.replace(EMAIL_RE, "[removido]");
+  return /^(gid|https?):\/\//i.test(t.trim()) ? t : t.replace(PHONE_RE, "[removido]");
+}
 function scrubDeep(v, depth = 0) {
-  if (typeof v === "string") return scrubSummary(redactKeys(v, PROOF_MAX).text);
-  if (depth > 4) return null;
-  if (Array.isArray(v)) return v.slice(0, 50).map((x) => scrubDeep(x, depth + 1));
+  if (typeof v === "string") return scrubProofText(v);
+  if (typeof v === "number" || typeof v === "boolean" || v === null) return v;
+  if (depth >= PROOF_DEPTH) throw new Error(`proof funda demais (m\xE1ximo ${PROOF_DEPTH} n\xEDveis). Grave s\xF3 o medido.`);
+  if (Array.isArray(v)) {
+    if (v.length > PROOF_ITEMS) throw new Error(`proof com lista grande demais (${v.length}; m\xE1ximo ${PROOF_ITEMS}). Grave a contagem e alguns exemplos.`);
+    return v.map((x) => scrubDeep(x, depth + 1));
+  }
   if (v && typeof v === "object") {
+    const entries = Object.entries(v);
+    if (entries.length > PROOF_KEYS) throw new Error(`proof com campos demais (${entries.length}; m\xE1ximo ${PROOF_KEYS}).`);
     const o = {};
-    for (const [k, x] of Object.entries(v).slice(0, 30)) o[redactKeys(String(k), 40).text] = scrubDeep(x, depth + 1);
+    for (const [k, x] of entries) o[scrubProofText(redactKeys(String(k), 40).text)] = scrubDeep(x, depth + 1);
     return o;
   }
-  return typeof v === "number" || typeof v === "boolean" || v === null ? v : null;
+  return null;
 }
 var TRAIL_STATUS = ["em_andamento", "feita", "provada", "pulada", "nao_feita"];
 var STEP_RE = /^[a-z_]{2,32}$/;
@@ -17591,7 +17606,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         rawSize = Infinity;
       }
       if (rawSize > PROOF_MAX) return text(`proof grande demais (${rawSize === Infinity ? "ileg\xEDvel" : rawSize}; m\xE1ximo ${PROOF_MAX} caracteres em JSON). Grave s\xF3 o medido.`, true);
-      const proof = scrubDeep(rawProof);
+      let proof;
+      try {
+        proof = scrubDeep(rawProof);
+      } catch (e) {
+        return text(e.message, true);
+      }
       const size = JSON.stringify(proof).length;
       if (size > PROOF_MAX) return text(`proof grande demais (${size}; m\xE1ximo ${PROOF_MAX} caracteres em JSON). Grave s\xF3 o medido.`, true);
       body.proof = proof;

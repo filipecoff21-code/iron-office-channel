@@ -227,17 +227,33 @@ function scrubSummary(s) {
     .replace(/(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g, "[removido]")
     .replace(/#\d{3,}/g, "[removido]");
 }
-// 0.8.0 (onda 27a): a prova da trilha vai pro site; todo texto dentro dela passa pelo filtro de segredo e de contato
+// 0.8.0 (onda 27a): a prova da trilha vai pro site. Todo texto passa pelo filtro de segredo e de e-mail; telefone
+// só em texto que não é endereço nem id (gid://, https://: os números deles não são telefone). O nº do pedido FICA
+// (a prova da compra teste é o pedido: gate r1 B1). Fundo, lista ou objeto grande demais: recusa, nunca corta
+// em silêncio (gate r1 B5).
+const PROOF_DEPTH = 4, PROOF_ITEMS = 50, PROOF_KEYS = 30;
+const EMAIL_RE = /[\w.+-]+@[\w-]+(\.[\w-]+)+/g;
+const PHONE_RE = /(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g;
+function scrubProofText(s) {
+  const t = redactKeys(s, PROOF_MAX).text.replace(EMAIL_RE, "[removido]");
+  return /^(gid|https?):\/\//i.test(t.trim()) ? t : t.replace(PHONE_RE, "[removido]");
+}
 function scrubDeep(v, depth = 0) {
-  if (typeof v === "string") return scrubSummary(redactKeys(v, PROOF_MAX).text);
-  if (depth > 4) return null;
-  if (Array.isArray(v)) return v.slice(0, 50).map((x) => scrubDeep(x, depth + 1));
+  if (typeof v === "string") return scrubProofText(v);
+  if (typeof v === "number" || typeof v === "boolean" || v === null) return v;
+  if (depth >= PROOF_DEPTH) throw new Error(`proof funda demais (máximo ${PROOF_DEPTH} níveis). Grave só o medido.`);
+  if (Array.isArray(v)) {
+    if (v.length > PROOF_ITEMS) throw new Error(`proof com lista grande demais (${v.length}; máximo ${PROOF_ITEMS}). Grave a contagem e alguns exemplos.`);
+    return v.map((x) => scrubDeep(x, depth + 1));
+  }
   if (v && typeof v === "object") {
+    const entries = Object.entries(v);
+    if (entries.length > PROOF_KEYS) throw new Error(`proof com campos demais (${entries.length}; máximo ${PROOF_KEYS}).`);
     const o = {};
-    for (const [k, x] of Object.entries(v).slice(0, 30)) o[redactKeys(String(k), 40).text] = scrubDeep(x, depth + 1);
+    for (const [k, x] of entries) o[scrubProofText(redactKeys(String(k), 40).text)] = scrubDeep(x, depth + 1);
     return o;
   }
-  return typeof v === "number" || typeof v === "boolean" || v === null ? v : null;
+  return null;
 }
 const TRAIL_STATUS = ["em_andamento", "feita", "provada", "pulada", "nao_feita"];
 const STEP_RE = /^[a-z_]{2,32}$/;
@@ -665,7 +681,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       let rawSize = Infinity;
       try { rawSize = JSON.stringify(rawProof).length; } catch { rawSize = Infinity; }
       if (rawSize > PROOF_MAX) return text(`proof grande demais (${rawSize === Infinity ? "ilegível" : rawSize}; máximo ${PROOF_MAX} caracteres em JSON). Grave só o medido.`, true);
-      const proof = scrubDeep(rawProof);
+      let proof;
+      try { proof = scrubDeep(rawProof); } catch (e) { return text(e.message, true); }
       const size = JSON.stringify(proof).length;
       if (size > PROOF_MAX) return text(`proof grande demais (${size}; máximo ${PROOF_MAX} caracteres em JSON). Grave só o medido.`, true);
       body.proof = proof;
