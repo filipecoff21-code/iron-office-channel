@@ -17746,7 +17746,8 @@ function presenceOnce() {
   return presenceInFlight;
 }
 var MAX_MCP = 50;
-var MCP_PRIORITY = ["meta-ads"];
+var MCP_PRIORITY = ["meta-ads", "claude-in-chrome"];
+var CHROME = "claude-in-chrome";
 function mcpKeys(obj) {
   const m = obj && typeof obj === "object" ? obj.mcpServers : null;
   return m && typeof m === "object" && !Array.isArray(m) ? Object.keys(m) : [];
@@ -17778,7 +17779,8 @@ function mcpServerNames(home = homedir2(), cwd = process.cwd()) {
   if (mcpJson === void 0) return null;
   const fromJson = mcpKeys(mcpJson).filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
   const off = new Set(strList(p.disabledMcpServers));
-  const names = [.../* @__PURE__ */ new Set([...mcpKeys(user), ...mcpKeys(p), ...fromJson])].map((n) => n.trim()).filter((n) => n.length > 0 && n.length <= 64 && !off.has(n));
+  const chrome = user?.cachedChromeExtensionInstalled === true && user?.claudeInChromeDefaultEnabled !== false ? [CHROME] : [];
+  const names = [.../* @__PURE__ */ new Set([...mcpKeys(user), ...mcpKeys(p), ...fromJson, ...chrome])].map((n) => n.trim()).filter((n) => n.length > 0 && n.length <= 64 && !off.has(n));
   names.sort((x, y) => Number(MCP_PRIORITY.includes(y)) - Number(MCP_PRIORITY.includes(x)));
   return names.slice(0, MAX_MCP);
 }

@@ -595,6 +595,18 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   writeFileSync(join(cheio, ".claude.json"), JSON.stringify({ mcpServers: muitos }));
   const b5 = await rodar(cheio);
   check("mais de 50: corta em 50 e meta-ads vem primeiro", b5?.mcp_servers?.length === 50 && b5.mcp_servers[0] === "meta-ads", JSON.stringify(b5?.mcp_servers?.slice(0, 3)));
+  // 0.8.0: extensão Claude in Chrome (2 booleanos no ~/.claude.json, fora de mcpServers)
+  const chromeOn = casa();
+  writeFileSync(join(chromeOn, ".claude.json"), JSON.stringify({ cachedChromeExtensionInstalled: true, claudeInChromeDefaultEnabled: true, mcpServers: { "meta-ads": {} } }));
+  const b7 = await rodar(chromeOn);
+  check("Chrome instalado e ligado: claude-in-chrome entra na lista", JSON.stringify(b7?.mcp_servers) === JSON.stringify(["meta-ads", "claude-in-chrome"]), JSON.stringify(b7?.mcp_servers));
+  const chromeOff = casa();
+  writeFileSync(join(chromeOff, ".claude.json"), JSON.stringify({ cachedChromeExtensionInstalled: true, claudeInChromeDefaultEnabled: false }));
+  const b8 = await rodar(chromeOff);
+  const chromeNo = casa();
+  writeFileSync(join(chromeNo, ".claude.json"), JSON.stringify({ cachedChromeExtensionInstalled: "true", claudeInChromeDefaultEnabled: true }));
+  const b9 = await rodar(chromeNo);
+  check("Chrome desligado, ou instalado com valor que não é true: fora da lista", b8?.mcp_servers?.length === 0 && b9?.mcp_servers?.length === 0, JSON.stringify([b8?.mcp_servers, b9?.mcp_servers]));
 }
 
 // ─── 13b. endereço padrão (0.6.0): sem IRON_OFFICE_URL, servidor, hook e dist apontam pra https://ironoffice.app ─
