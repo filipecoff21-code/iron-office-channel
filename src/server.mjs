@@ -745,6 +745,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const why = e.message === "sem chave" ? "a nota de velocidade ainda não está ligada no site (falta a chave do Google do dono)"
         : e.message === "limite" ? "o Google limitou as medidas agora; tente de novo mais tarde"
         : e.message === "loja sem Shopify" ? "essa loja não tem a Shopify conectada"
+        : e.message === "loja com senha" ? "a loja ainda está com senha, e a nota seria da tela de senha; tire a senha (Loja virtual → Preferências) e me peça de novo"
         : e.status === 404 ? "loja não encontrada nesta conta (confira o project_id no shop_status)"
         : e.name === "AbortError" ? "o PageSpeed demorou demais; tente de novo em 1 minuto"
         : e.message;

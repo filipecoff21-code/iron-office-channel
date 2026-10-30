@@ -17663,7 +17663,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(JSON.stringify({ url: res.url ?? null, score: res.score ?? null, top3: Array.isArray(res.top3) ? res.top3.slice(0, 3) : [] }));
     } catch (e) {
       if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
-      const why = e.message === "sem chave" ? "a nota de velocidade ainda n\xE3o est\xE1 ligada no site (falta a chave do Google do dono)" : e.message === "limite" ? "o Google limitou as medidas agora; tente de novo mais tarde" : e.message === "loja sem Shopify" ? "essa loja n\xE3o tem a Shopify conectada" : e.status === 404 ? "loja n\xE3o encontrada nesta conta (confira o project_id no shop_status)" : e.name === "AbortError" ? "o PageSpeed demorou demais; tente de novo em 1 minuto" : e.message;
+      const why = e.message === "sem chave" ? "a nota de velocidade ainda n\xE3o est\xE1 ligada no site (falta a chave do Google do dono)" : e.message === "limite" ? "o Google limitou as medidas agora; tente de novo mais tarde" : e.message === "loja sem Shopify" ? "essa loja n\xE3o tem a Shopify conectada" : e.message === "loja com senha" ? "a loja ainda est\xE1 com senha, e a nota seria da tela de senha; tire a senha (Loja virtual \u2192 Prefer\xEAncias) e me pe\xE7a de novo" : e.status === 404 ? "loja n\xE3o encontrada nesta conta (confira o project_id no shop_status)" : e.name === "AbortError" ? "o PageSpeed demorou demais; tente de novo em 1 minuto" : e.message;
       return text(`N\xE3o deu pra medir a velocidade: ${String(why).replace(/[.\s]+$/, "")}.`, true);
     }
   }
