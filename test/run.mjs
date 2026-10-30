@@ -987,7 +987,8 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     v: 1, at: "2026-10-30T17:55:00-03:00", account_id: "act_2368980233921315", account_name: "Conta da loja", currency: "BRL", window_days: 7,
     spend: 152.4, impressions: 10000, clicks: 200, results: 6, result_label: "compras",
     campaigns: [{ name: "Vendas", status: "ACTIVE", spend: 152.4, results: 6 }],
-    top_ads: [{ name: "Peça fale (31) 99999-9999", campaign: "Vendas", spend: 100, impressions: 8000, results: 5 }],
+    top_ads: [{ name: "Peça fale (31) 99999-9999", campaign: "Vendas", spend: 100, impressions: 8000, results: 5 },
+      { name: "Vaga @perfil_da.pessoa · zap 32 9 8457-7529", campaign: "Turma 2025-2026 · 2026-10-30 14:30 · R$ 1.250,00", spend: 1 }],
     alerts: [{ kind: "data_vencida", ad: "Turma 25/10 · id 120211234567890123", campaign: "Vendas", detail: "a data 25/10 já passou; contato joao@exemplo.com", action: "pausar ou trocar a peça" }],
     checked: { ads: 3, copy: 3, art: false }, ramp: [], ...extra,
   });
@@ -1015,6 +1016,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const body = posts.find((c) => c.path === `/api/stores/${LOJA}/ads`)?.body?.snapshot ?? {};
   check("ads_status: POST com a chave e resposta { ok, saved_at }", /"ok":true/.test(txt(s, 10)) && /2026-10-30T18:00/.test(txt(s, 10)) && posts[0]?.key === KEY, txt(s, 10));
   check("ads_status: telefone no nome da peça e e-mail no detalhe viram [removido]", body.top_ads?.[0]?.name === "Peça fale [removido]" && /\[removido\]/.test(body.alerts?.[0]?.detail ?? "") && !/@/.test(JSON.stringify(body)), JSON.stringify(body.top_ads?.[0]) + " " + body.alerts?.[0]?.detail);
+  check("ads_status (gate r1): @perfil e celular com o 9 solto viram [removido]; ano, data, hora e preço ficam", body.top_ads?.[1]?.name === "Vaga [removido] · zap [removido]" && body.top_ads?.[1]?.campaign === "Turma 2025-2026 · 2026-10-30 14:30 · R$ 1.250,00", JSON.stringify(body.top_ads?.[1]));
   check("ads_status: id da Meta (conta e no nome) não vira [removido]", body.account_id === "act_2368980233921315" && /120211234567890123/.test(body.alerts?.[0]?.ad ?? ""), body.account_id + " " + body.alerts?.[0]?.ad);
   check("ads_status: project_id que não é uuid recusado sem rede", res(s, 11)?.isError === true && posts.length <= 2, txt(s, 11));
   check("ads_status: retrato > 8 kB recusado no plugin", res(s, 12)?.isError === true && /8 kB/.test(txt(s, 12)), txt(s, 12));

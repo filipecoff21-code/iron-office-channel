@@ -237,9 +237,11 @@ const PHONE_RE = /(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g;
 // 0.9.0 (onda 28): telefone só quando o número está sozinho (9 a 12 dígitos); id da Meta, número de conta e
 // dígito corrido maior não casam (a borda (?<!\d)/(?!\d) impede comer o fim de um id de 16 dígitos)
 const ADS_MAX = 8192;
-const ADS_PHONE_RE = /(?<!\d)(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}(?!\d)/g;
+// gate r1: "32 9 8457-7529" (o 9 solto) também; e @perfil de pessoa em nome de campanha (medido numa conta real) sai
+const ADS_PHONE_RE = /(?<!\d)(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s.-]?(?:9[\s.-]?)?\d{3,5}[\s.-]?\d{4}(?!\d)/g;
+const ADS_HANDLE_RE = /(?<![\w.@])@[A-Za-z0-9_.]{2,30}/g;
 function scrubAdsText(s) {
-  return redactKeys(s, 2000).text.replace(EMAIL_RE, "[removido]").replace(ADS_PHONE_RE, "[removido]");
+  return redactKeys(s, 2000).text.replace(EMAIL_RE, "[removido]").replace(ADS_HANDLE_RE, "[removido]").replace(ADS_PHONE_RE, "[removido]");
 }
 function scrubAds(v, key = "", depth = 0) {
   if (typeof v === "string") return key === "account_id" || key === "at" || key === "since" || key === "until" ? redactKeys(v, 64).text : scrubAdsText(v);
