@@ -530,7 +530,7 @@ const TOOLS = DEGRADED
       {
         name: "ads_status",
         description:
-          "Grava no Iron Office o retrato dos anúncios do projeto (skill `anuncios`): números dos últimos 7 dias, campanhas, peças e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot: { v: 1, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, campaigns: [{ name, status: ACTIVE|PAUSED, spend, results }] (≤10), top_ads: [{ name, campaign, spend, impressions, results }] (≤5), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (≤10), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (≤10) }. Até 8 kB. Só na sessão aberta com ironoffice.",
+          "Grava no Iron Office o retrato dos anúncios do projeto (skill `anuncios`): números dos últimos 7 dias, campanhas, peças e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot: { v: 1, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED…), spend, results }] (≤10), top_ads: [{ name, campaign, spend, impressions, results }] (≤5), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (≤10), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (≤10) }. Até 8 kB. Só na sessão aberta com ironoffice.",
         inputSchema: {
           type: "object",
           properties: {
