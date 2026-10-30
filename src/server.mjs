@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.9.1";
+const VERSION = "0.9.2";
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -250,7 +250,8 @@ function scrubAds(v, key = "", depth = 0) {
   if (Array.isArray(v)) return v.slice(0, 20).map((x) => scrubAds(x, key, depth + 1));
   if (typeof v === "object") {
     const out = {};
-    for (const [k, x] of Object.entries(v).slice(0, 30)) out[redactKeys(String(k), 40).text] = scrubAds(x, k, depth + 1);
+    // 0.9.2: o retrato v2 tem 29 chaves no topo (funil plano); 40 dá folga sem cortar campo calado
+    for (const [k, x] of Object.entries(v).slice(0, 40)) out[redactKeys(String(k), 40).text] = scrubAds(x, k, depth + 1);
     return out;
   }
   return null;
@@ -530,7 +531,7 @@ const TOOLS = DEGRADED
       {
         name: "ads_status",
         description:
-          "Grava no Iron Office o retrato dos anúncios do projeto (skill `anuncios`): números dos últimos 7 dias, campanhas, peças e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot: { v: 1, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED…), spend, results, adsets_active, adsets_total (grupos da campanha no ar / total, contados pelo campaign_id) }] (≤10), top_ads: [{ name, campaign, spend, impressions, results }] (≤5), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (≤10), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (≤10) }. Até 8 kB. Só na sessão aberta com ironoffice.",
+          "Grava no Iron Office o retrato dos anúncios do projeto (skill `anuncios`): números dos últimos 7 dias, funil, campanhas, peças e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot (v 2; tudo PLANO, sem objeto dentro de campanha ou peça): { v: 2, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, FUNIL, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED…), spend, results, result_label (o resultado DESTA campanha, ex. \"engajamentos\"), adsets_active, adsets_total (grupos no ar / total, pelo campaign_id), FUNIL }] (≤10), top_ads: [{ name, campaign, spend, impressions, results, video_3s, thruplay, link_clicks, lpv, purchases, product_handle? (handle da Shopify do link da peça) }] (≤5), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (≤10), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (≤10) }. FUNIL = reach, frequency, video_3s, thruplay, link_clicks, lpv, view_content, atc, ic, payment, purchases, revenue: número, ou null quando a Meta não mandou (nunca 0 no lugar de null). Até 8 kB. A resposta traz `pricing` (CPA máximo × real, frase pronta) e `reading` (sobra | paga a conta | prejuízo | sem referência). Só na sessão aberta com ironoffice.",
         inputSchema: {
           type: "object",
           properties: {
@@ -768,7 +769,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
   }
 
-  // 0.9.1 (onda 28): o retrato dos anúncios vai pro site. Todo texto passa pelo filtro de segredo, e-mail e telefone
+  // 0.9.1 (onda 28): o retrato dos anúncios vai pro site. 0.9.2 (rev2): v2 com funil, e a resposta traz a precificação. Todo texto passa pelo filtro de segredo, e-mail e telefone
   // (o site recusa o que sobrar); account_id não é texto livre: só act_ + dígitos (o filtro de telefone o comeria).
   if (name === "ads_status") {
     if (mode !== "active") return text(`Esta sessão não grava no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
@@ -781,7 +782,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (Buffer.byteLength(raw, "utf8") > ADS_MAX) return text("O retrato passou de 8 kB: mande menos campanhas/peças ou textos mais curtos.", true);
     try {
       const res = await api(`/api/stores/${id}/ads`, { method: "POST", body: { snapshot: scrubbed } });
-      return text(JSON.stringify({ ok: res?.ok === true, saved_at: res?.saved_at ?? null }));
+      // 0.9.2: o site devolve o resumo da precificação; vai pro Iron só a frase e a leitura (texto do próprio site)
+      const ps = res?.pricing_summary;
+      const pricing = ps && typeof ps.text === "string" ? redactKeys(ps.text, 300).text : null;
+      const reading = ps && typeof ps.reading === "string" ? ps.reading.slice(0, 20) : null;
+      return text(JSON.stringify({ ok: res?.ok === true, saved_at: res?.saved_at ?? null, pricing, reading }));
     } catch (e) {
       if (e instanceof AuthError) return text("Chave do Iron Office inválida: refaça o passo 2 em ironoffice.app/onboarding.", true);
       if (e.status === 404) return text("Projeto não encontrado nesta conta (confira o project_id no shop_status).", true);

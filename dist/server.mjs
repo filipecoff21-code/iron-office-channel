@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.9.1";
+var VERSION = "0.9.2";
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17210,7 +17210,7 @@ function scrubAds(v, key = "", depth = 0) {
   if (Array.isArray(v)) return v.slice(0, 20).map((x) => scrubAds(x, key, depth + 1));
   if (typeof v === "object") {
     const out = {};
-    for (const [k, x] of Object.entries(v).slice(0, 30)) out[redactKeys(String(k), 40).text] = scrubAds(x, k, depth + 1);
+    for (const [k, x] of Object.entries(v).slice(0, 40)) out[redactKeys(String(k), 40).text] = scrubAds(x, k, depth + 1);
     return out;
   }
   return null;
@@ -17460,7 +17460,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "ads_status",
-    description: "Grava no Iron Office o retrato dos an\xFAncios do projeto (skill `anuncios`): n\xFAmeros dos \xFAltimos 7 dias, campanhas, pe\xE7as e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot: { v: 1, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED\u2026), spend, results, adsets_active, adsets_total (grupos da campanha no ar / total, contados pelo campaign_id) }] (\u226410), top_ads: [{ name, campaign, spend, impressions, results }] (\u22645), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (\u226410), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (\u226410) }. At\xE9 8 kB. S\xF3 na sess\xE3o aberta com ironoffice.",
+    description: 'Grava no Iron Office o retrato dos an\xFAncios do projeto (skill `anuncios`): n\xFAmeros dos \xFAltimos 7 dias, funil, campanhas, pe\xE7as e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot (v 2; tudo PLANO, sem objeto dentro de campanha ou pe\xE7a): { v: 2, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, FUNIL, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED\u2026), spend, results, result_label (o resultado DESTA campanha, ex. "engajamentos"), adsets_active, adsets_total (grupos no ar / total, pelo campaign_id), FUNIL }] (\u226410), top_ads: [{ name, campaign, spend, impressions, results, video_3s, thruplay, link_clicks, lpv, purchases, product_handle? (handle da Shopify do link da pe\xE7a) }] (\u22645), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (\u226410), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (\u226410) }. FUNIL = reach, frequency, video_3s, thruplay, link_clicks, lpv, view_content, atc, ic, payment, purchases, revenue: n\xFAmero, ou null quando a Meta n\xE3o mandou (nunca 0 no lugar de null). At\xE9 8 kB. A resposta traz `pricing` (CPA m\xE1ximo \xD7 real, frase pronta) e `reading` (sobra | paga a conta | preju\xEDzo | sem refer\xEAncia). S\xF3 na sess\xE3o aberta com ironoffice.',
     inputSchema: {
       type: "object",
       properties: {
@@ -17697,7 +17697,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (Buffer.byteLength(raw, "utf8") > ADS_MAX) return text("O retrato passou de 8 kB: mande menos campanhas/pe\xE7as ou textos mais curtos.", true);
     try {
       const res = await api(`/api/stores/${id}/ads`, { method: "POST", body: { snapshot: scrubbed } });
-      return text(JSON.stringify({ ok: res?.ok === true, saved_at: res?.saved_at ?? null }));
+      const ps = res?.pricing_summary;
+      const pricing = ps && typeof ps.text === "string" ? redactKeys(ps.text, 300).text : null;
+      const reading = ps && typeof ps.reading === "string" ? ps.reading.slice(0, 20) : null;
+      return text(JSON.stringify({ ok: res?.ok === true, saved_at: res?.saved_at ?? null, pricing, reading }));
     } catch (e) {
       if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
       if (e.status === 404) return text("Projeto n\xE3o encontrado nesta conta (confira o project_id no shop_status).", true);

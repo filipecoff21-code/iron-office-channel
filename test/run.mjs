@@ -977,7 +977,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const LOJA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const f = await fakeOffice((c) => {
     if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
-    if (c.path === `/api/stores/${LOJA}/ads` && c.method === "POST") return { json: { ok: true, saved_at: "2026-10-30T18:00:00Z" } };
+    if (c.path === `/api/stores/${LOJA}/ads` && c.method === "POST") return { json: { ok: true, saved_at: "2026-10-30T18:00:00Z", pricing_summary: { reading: "sobra", text: "CPA máximo R$ 92,40 · alvo R$ 72,40 · real R$ 59,90 → sobra R$ 32,50 por venda." } } };
     if (c.path.startsWith("/api/stores/") && c.method === "POST") return { status: 404, json: { error: "Projeto não encontrado." } };
   });
   const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
@@ -1012,6 +1012,12 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 13, "ads_status", { project_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", snapshot: snap() });
   call(s, 14, "ads_status", { project_id: LOJA, snapshot: [1, 2] });
   s.send({ jsonrpc: "2.0", id: 15, method: "tools/list" });
+  // 0.9.2: retrato v2 (funil plano, null = a Meta não mandou, result_label por campanha, product_handle)
+  const FUNIL = { reach: 12000, frequency: 1.5, video_3s: 4000, thruplay: 1500, link_clicks: 600, lpv: 500, view_content: 480, atc: null, ic: 30, payment: null, purchases: 12, revenue: 3000 };
+  call(s, 16, "ads_status", { project_id: LOJA, snapshot: snap({ v: 2, ...FUNIL,
+    campaigns: [{ name: "Vendas", status: "ACTIVE", spend: 152.4, results: 6, result_label: "compras no site", adsets_active: 1, adsets_total: 1, ...FUNIL }],
+    top_ads: [{ name: "ad1", campaign: "Vendas", spend: 100, impressions: 8000, results: 5, video_3s: 2400, thruplay: 800, link_clicks: 250, lpv: 220, purchases: 5, product_handle: "produto-exemplo" },
+      { name: "ad2", campaign: "Vendas", spend: 1, impressions: 10, results: 0, product_handle: "fale-joao@exemplo.com" }] }) });
   await sleep(1200);
   const posts = f.calls.filter((c) => c.path.endsWith("/ads"));
   const body = posts.find((c) => c.path === `/api/stores/${LOJA}/ads`)?.body?.snapshot ?? {};
@@ -1019,10 +1025,19 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("ads_status: telefone no nome da peça e e-mail no detalhe viram [removido]", body.top_ads?.[0]?.name === "Peça fale [removido]" && /\[removido\]/.test(body.alerts?.[0]?.detail ?? "") && !/@/.test(JSON.stringify(body)), JSON.stringify(body.top_ads?.[0]) + " " + body.alerts?.[0]?.detail);
   check("ads_status (gate r1): @perfil e celular com o 9 solto viram [removido]; ano, data, hora e preço ficam", body.top_ads?.[1]?.name === "Vaga [removido] · zap [removido]" && body.top_ads?.[1]?.campaign === "Turma 2025-2026 · 2026-10-30 14:30 · R$ 1.250,00", JSON.stringify(body.top_ads?.[1]));
   check("ads_status: id da Meta (conta e no nome) não vira [removido]", body.account_id === "act_1000000000000002" && /120211234567890123/.test(body.alerts?.[0]?.ad ?? ""), body.account_id + " " + body.alerts?.[0]?.ad);
+  const posts16 = f.calls.filter((c) => c.path === `/api/stores/${LOJA}/ads`);
+  const v2 = posts16[posts16.length - 1]?.body?.snapshot ?? {};
+  check("ads_status (0.9.2): retrato v2 passa inteiro (29 chaves no topo, funil plano, null fica null)",
+    v2.v === 2 && v2.lpv === 500 && v2.atc === null && v2.payment === null && v2.revenue === 3000 && v2.ramp !== undefined && v2.checked?.art === false
+    && v2.campaigns?.[0]?.result_label === "compras no site" && v2.campaigns?.[0]?.ic === 30 && v2.campaigns?.[0]?.atc === null
+    && v2.top_ads?.[0]?.product_handle === "produto-exemplo" && v2.top_ads?.[0]?.video_3s === 2400, JSON.stringify(v2).slice(0, 400));
+  check("ads_status (0.9.2): product_handle com e-mail vira [removido] (o site recusa)", /\[removido\]/.test(v2.top_ads?.[1]?.product_handle ?? "") && !/@/.test(v2.top_ads?.[1]?.product_handle ?? ""), v2.top_ads?.[1]?.product_handle);
+  check("ads_status (0.9.2): a resposta traz a precificação e a leitura do site", /"pricing":"CPA máximo R\$ 92,40/.test(txt(s, 16)) && /"reading":"sobra"/.test(txt(s, 16)), txt(s, 16));
   check("ads_status (0.9.1): grupos da campanha (adsets_active/adsets_total) chegam ao site como número", body.campaigns?.[0]?.adsets_active === 0 && body.campaigns?.[0]?.adsets_total === 2, JSON.stringify(body.campaigns?.[0]));
   const desc = s.out.find((o) => o.msg.id === 15)?.msg.result.tools.find((t) => t.name === "ads_status")?.description ?? "";
+  check("ads_status (0.9.2): descrição pede v 2, FUNIL plano com null e result_label por campanha", /v: 2/.test(desc) && /null quando a Meta não mandou/.test(desc) && /result_label \(o resultado DESTA campanha/.test(desc), desc.slice(0, 80));
   check("ads_status (0.9.1): a descrição pede adsets_active e adsets_total", /adsets_active/.test(desc) && /adsets_total/.test(desc), desc.slice(0, 80));
-  check("ads_status: project_id que não é uuid recusado sem rede", res(s, 11)?.isError === true && posts.length <= 2, txt(s, 11));
+  check("ads_status: project_id que não é uuid recusado sem rede", res(s, 11)?.isError === true && !posts.some((c) => !/^\/api\/stores\/[0-9a-f-]{36}\/ads$/.test(c.path)), txt(s, 11));
   check("ads_status: retrato > 8 kB recusado no plugin", res(s, 12)?.isError === true && /8 kB/.test(txt(s, 12)), txt(s, 12));
   check("ads_status: projeto de outra conta (404) vira 'Projeto não encontrado'", res(s, 13)?.isError === true && /Projeto não encontrado nesta conta/.test(txt(s, 13)), txt(s, 13));
   check("ads_status: snapshot que não é objeto recusado", res(s, 14)?.isError === true, txt(s, 14));
