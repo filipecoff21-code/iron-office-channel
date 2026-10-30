@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.8.1";
+const VERSION = "0.9.0";
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -234,6 +234,25 @@ function scrubSummary(s) {
 const PROOF_DEPTH = 4, PROOF_ITEMS = 50, PROOF_KEYS = 30;
 const EMAIL_RE = /[\w.+-]+@[\w-]+(\.[\w-]+)+/g;
 const PHONE_RE = /(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g;
+// 0.9.0 (onda 28): telefone só quando o número está sozinho (9 a 12 dígitos); id da Meta, número de conta e
+// dígito corrido maior não casam (a borda (?<!\d)/(?!\d) impede comer o fim de um id de 16 dígitos)
+const ADS_MAX = 8192;
+const ADS_PHONE_RE = /(?<!\d)(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}(?!\d)/g;
+function scrubAdsText(s) {
+  return redactKeys(s, 2000).text.replace(EMAIL_RE, "[removido]").replace(ADS_PHONE_RE, "[removido]");
+}
+function scrubAds(v, key = "", depth = 0) {
+  if (typeof v === "string") return key === "account_id" || key === "at" || key === "since" || key === "until" ? redactKeys(v, 64).text : scrubAdsText(v);
+  if (typeof v === "number" || typeof v === "boolean" || v === null) return v;
+  if (depth >= 4) return null;
+  if (Array.isArray(v)) return v.slice(0, 20).map((x) => scrubAds(x, key, depth + 1));
+  if (typeof v === "object") {
+    const out = {};
+    for (const [k, x] of Object.entries(v).slice(0, 30)) out[redactKeys(String(k), 40).text] = scrubAds(x, k, depth + 1);
+    return out;
+  }
+  return null;
+}
 function scrubProofText(s) {
   const t = redactKeys(s, PROOF_MAX).text.replace(EMAIL_RE, "[removido]");
   return /^(gid|https?):\/\//i.test(t.trim()) ? t : t.replace(PHONE_RE, "[removido]");
@@ -347,6 +366,7 @@ const INSTRUCTIONS = DEGRADED
       "A primeira linha `[loja: …]` diz a loja ativa do aluno: o pedido é sobre ela. Se a ficha existe (caminho relativo à pasta onde esta sessão abriu, o cofre), leia-a antes de responder. Se diz `ficha: ainda sem ficha` e o pedido é sobre a loja, ofereça em 1 linha montar a ficha (skill `loja`) e espere o sim; sem o sim, responda o pedido normalmente.",
       "`reply`, `deliver` e as LEITURAS do `shop_query` vão pra loja da última mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: …]`, ou o `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
       "Pedido `/mcp`, 'ligar a Meta' ou ferramenta da Meta (`mcp__meta-ads__*`) que não existe nesta sessão: responda os 3 passos (no terminal: digite `/mcp` → escolha `meta-ads` → entre com o Facebook; depois feche e abra o `ironoffice`), nunca 'não funciona aqui'.",
+      "Pedido `anúncios: atualizar` (botão do site) ou 'como estão meus anúncios': carregue a skill `anuncios`; o retrato vai pro site pela ferramenta `ads_status`.",
       "Pedido `trilha: <etapa>` ou `continuar a trilha`: carregue a skill `trilha`, chame `trail_status` antes de agir e `trail_update` depois de medir; nunca marque `provada` sem a prova medida.",
       "Perguntas ao aluno: UMA por mensagem, pela ferramenta `ask` com opções quando couber (até 6) e `skip`; espere a resposta antes da próxima; nunca mande lista de perguntas.",
       "Ação de pedido: o cartão já apareceu acima da sua resposta; diga 'confirme no cartão acima' em 1 linha, sem repetir o conteúdo do cartão.",
@@ -503,6 +523,19 @@ const TOOLS = DEGRADED
           type: "object",
           properties: { project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: …] ou do shop_status)." } },
           required: ["project_id"],
+        },
+      },
+      {
+        name: "ads_status",
+        description:
+          "Grava no Iron Office o retrato dos anúncios do projeto (skill `anuncios`): números dos últimos 7 dias, campanhas, peças e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot: { v: 1, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, campaigns: [{ name, status: ACTIVE|PAUSED, spend, results }] (≤10), top_ads: [{ name, campaign, spend, impressions, results }] (≤5), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (≤10), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (≤10) }. Até 8 kB. Só na sessão aberta com ironoffice.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project_id: { type: "string", description: "id do projeto (o `id:` da linha [loja: …] ou do shop_status)." },
+            snapshot:   { type: "object", description: "o retrato medido (formato na descrição)." },
+          },
+          required: ["project_id", "snapshot"],
         },
       },
       {
@@ -730,6 +763,28 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(JSON.stringify({ stores: res.stores, active: lastStoreId }));
     } catch (e) {
       return text(`Falhou ao consultar a loja: ${e.message}`, true);
+    }
+  }
+
+  // 0.9.0 (onda 28): o retrato dos anúncios vai pro site. Todo texto passa pelo filtro de segredo, e-mail e telefone
+  // (o site recusa o que sobrar); account_id não é texto livre: só act_ + dígitos (o filtro de telefone o comeria).
+  if (name === "ads_status") {
+    if (mode !== "active") return text(`Esta sessão não grava no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
+    const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
+    if (!UUID_RE.test(id)) return text("project_id inválido: use o id do projeto (linha [loja: …] ou shop_status).", true);
+    const snap = args.snapshot;
+    if (!snap || typeof snap !== "object" || Array.isArray(snap)) return text("snapshot tem que ser um objeto (formato na descrição da ferramenta).", true);
+    const scrubbed = scrubAds(snap);
+    const raw = JSON.stringify(scrubbed);
+    if (Buffer.byteLength(raw, "utf8") > ADS_MAX) return text("O retrato passou de 8 kB: mande menos campanhas/peças ou textos mais curtos.", true);
+    try {
+      const res = await api(`/api/stores/${id}/ads`, { method: "POST", body: { snapshot: scrubbed } });
+      return text(JSON.stringify({ ok: res?.ok === true, saved_at: res?.saved_at ?? null }));
+    } catch (e) {
+      if (e instanceof AuthError) return text("Chave do Iron Office inválida: refaça o passo 2 em ironoffice.app/onboarding.", true);
+      if (e.status === 404) return text("Projeto não encontrado nesta conta (confira o project_id no shop_status).", true);
+      if (e.status === 400 || e.status === 413) return text(`O site recusou o retrato: ${redactKeys(String(e.message ?? ""), 300).text}`, true);
+      return text(`Falhou ao gravar o retrato dos anúncios: ${e.message}`, true);
     }
   }
 

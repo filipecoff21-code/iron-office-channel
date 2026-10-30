@@ -971,6 +971,59 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   f.srv.close();
 }
 
+// ─── 16b. retrato dos anúncios (0.9.0, onda 28) ─────────────────────────
+{
+  console.log("ads_status (0.9.0)");
+  const LOJA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === `/api/stores/${LOJA}/ads` && c.method === "POST") return { json: { ok: true, saved_at: "2026-10-30T18:00:00Z" } };
+    if (c.path.startsWith("/api/stores/") && c.method === "POST") return { status: 404, json: { error: "Projeto não encontrado." } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+  const snap = (extra = {}) => ({
+    v: 1, at: "2026-10-30T17:55:00-03:00", account_id: "act_2368980233921315", account_name: "Conta da loja", currency: "BRL", window_days: 7,
+    spend: 152.4, impressions: 10000, clicks: 200, results: 6, result_label: "compras",
+    campaigns: [{ name: "Vendas", status: "ACTIVE", spend: 152.4, results: 6 }],
+    top_ads: [{ name: "Peça fale (31) 99999-9999", campaign: "Vendas", spend: 100, impressions: 8000, results: 5 }],
+    alerts: [{ kind: "data_vencida", ad: "Turma 25/10 · id 120211234567890123", campaign: "Vendas", detail: "a data 25/10 já passou; contato joao@exemplo.com", action: "pausar ou trocar a peça" }],
+    checked: { ads: 3, copy: 3, art: false }, ramp: [], ...extra,
+  });
+
+  const p = startServer(casa(), f.url, {});
+  p.handshake();
+  await sleep(1500);
+  call(p, 2, "ads_status", { project_id: LOJA, snapshot: snap() });
+  await sleep(500);
+  check("ads_status fora do canal: recusa sem chamar o site", res(p, 2)?.isError === true && !f.calls.some((c) => c.path.endsWith("/ads")), txt(p, 2));
+  p.p.kill();
+
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(2500);
+  const ins = s.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
+  check("instrução: 'anúncios: atualizar' → skill anuncios + ads_status", /anúncios: atualizar/.test(ins) && /skill `anuncios`/.test(ins) && /ads_status/.test(ins));
+  call(s, 10, "ads_status", { project_id: LOJA, snapshot: snap() });
+  call(s, 11, "ads_status", { project_id: "../x", snapshot: snap() });
+  call(s, 12, "ads_status", { project_id: LOJA, snapshot: snap({ top_ads: Array.from({ length: 5 }, () => ({ name: "x".repeat(2000) })), alerts: Array.from({ length: 10 }, () => ({ kind: "recusada", ad: "y".repeat(2000), detail: "z", action: "a" })) }) });
+  call(s, 13, "ads_status", { project_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", snapshot: snap() });
+  call(s, 14, "ads_status", { project_id: LOJA, snapshot: [1, 2] });
+  await sleep(1200);
+  const posts = f.calls.filter((c) => c.path.endsWith("/ads"));
+  const body = posts.find((c) => c.path === `/api/stores/${LOJA}/ads`)?.body?.snapshot ?? {};
+  check("ads_status: POST com a chave e resposta { ok, saved_at }", /"ok":true/.test(txt(s, 10)) && /2026-10-30T18:00/.test(txt(s, 10)) && posts[0]?.key === KEY, txt(s, 10));
+  check("ads_status: telefone no nome da peça e e-mail no detalhe viram [removido]", body.top_ads?.[0]?.name === "Peça fale [removido]" && /\[removido\]/.test(body.alerts?.[0]?.detail ?? "") && !/@/.test(JSON.stringify(body)), JSON.stringify(body.top_ads?.[0]) + " " + body.alerts?.[0]?.detail);
+  check("ads_status: id da Meta (conta e no nome) não vira [removido]", body.account_id === "act_2368980233921315" && /120211234567890123/.test(body.alerts?.[0]?.ad ?? ""), body.account_id + " " + body.alerts?.[0]?.ad);
+  check("ads_status: project_id que não é uuid recusado sem rede", res(s, 11)?.isError === true && posts.length <= 2, txt(s, 11));
+  check("ads_status: retrato > 8 kB recusado no plugin", res(s, 12)?.isError === true && /8 kB/.test(txt(s, 12)), txt(s, 12));
+  check("ads_status: projeto de outra conta (404) vira 'Projeto não encontrado'", res(s, 13)?.isError === true && /Projeto não encontrado nesta conta/.test(txt(s, 13)), txt(s, 13));
+  check("ads_status: snapshot que não é objeto recusado", res(s, 14)?.isError === true, txt(s, 14));
+  s.p.kill();
+  f.srv.close();
+}
+
 // ─── 17. trilha e perguntas (0.8.0, onda 27a) ─────────────────────────────
 {
   console.log("trilha e perguntas (0.8.0)");
