@@ -402,6 +402,34 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   f.srv.close();
 }
 
+// ─── 10b. store_speed (0.8.1, onda 27b): nota de velocidade pelo site, em qualquer sessão ─
+{
+  console.log("store_speed");
+  const OK_ID = "11111111-1111-1111-1111-111111111111", SEM = "22222222-2222-2222-2222-222222222222";
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === `/api/stores/${OK_ID}/speed`) return { json: { url: "https://loja.com", score: 43, top3: [{ id: "a", title: "A", savings_ms: 900 }, {}, {}, { id: "x" }] } };
+    if (c.path === `/api/stores/${SEM}/speed`) return { status: 503, json: { error: "sem chave" } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const result = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "" });
+  s.handshake();
+  await sleep(1500);
+  call(s, 2, "store_speed", { project_id: OK_ID });
+  call(s, 3, "store_speed", { project_id: SEM });
+  call(s, 4, "store_speed", { project_id: "../x" });
+  await sleep(800);
+  let ok = {};
+  try { ok = JSON.parse(result(s, 2)?.content?.[0]?.text ?? ""); } catch {}
+  const hits = f.calls.filter((c) => c.path.endsWith("/speed"));
+  check("store_speed: GET com a chave, devolve url/score e no máximo 3 itens", ok.score === 43 && ok.url === "https://loja.com" && ok.top3?.length === 3 && hits[0]?.key === KEY && hits[0]?.method === "GET", JSON.stringify(result(s, 2)));
+  check("store_speed 503 'sem chave' vira frase em português, com isError", result(s, 3)?.isError === true && /ainda não está ligada no site/.test(result(s, 3)?.content?.[0]?.text ?? ""), JSON.stringify(result(s, 3)));
+  check("store_speed com id que não é uuid: erro sem rede", result(s, 4)?.isError === true && hits.length === 2, JSON.stringify(hits.map((h) => h.path)));
+  s.p.kill();
+  f.srv.close();
+}
+
 // ─── 11. despedida: fechar o canal anoitece o escritório na hora (0.3.7) ─
 {
   console.log("despedida (bye)");

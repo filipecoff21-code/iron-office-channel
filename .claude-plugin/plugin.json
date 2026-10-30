@@ -2,7 +2,7 @@
   "name": "iron-office",
   "displayName": "Iron Office",
   "description": "Canal do Iron Office: conversa com o Iron pelo dashboard (ironoffice.app) e mostra os agentes trabalhando no feed e no mapa 3D.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "author": { "name": "Iron Office" },
   "homepage": "https://ironoffice.app",
   "repository": "https://github.com/filipecoff21-code/iron-office-channel",

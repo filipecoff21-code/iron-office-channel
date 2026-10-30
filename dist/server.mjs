@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.7.2";
+var VERSION = "0.8.1";
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17250,9 +17250,9 @@ var AuthError = class extends Error {
 var REPLY_MAX = 2e4;
 var DELIVER_MAX = 5e4;
 var SHOP_MAX = 6e4;
-async function api(path, { method = "GET", body } = {}) {
+async function api(path, { method = "GET", body, timeoutMs = 15e3 } = {}) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 15e3);
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(`${BASE}${path}`, {
       method,
@@ -17290,6 +17290,7 @@ var INSTRUCTIONS = DEGRADED ? [
   "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
   "A primeira linha `[loja: \u2026]` diz a loja ativa do aluno: o pedido \xE9 sobre ela. Se a ficha existe (caminho relativo \xE0 pasta onde esta sess\xE3o abriu, o cofre), leia-a antes de responder. Se diz `ficha: ainda sem ficha` e o pedido \xE9 sobre a loja, ofere\xE7a em 1 linha montar a ficha (skill `loja`) e espere o sim; sem o sim, responda o pedido normalmente.",
   "`reply`, `deliver` e as LEITURAS do `shop_query` v\xE3o pra loja da \xFAltima mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: \u2026]`, ou o `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
+  "Pedido `/mcp`, 'ligar a Meta' ou ferramenta da Meta (`mcp__meta-ads__*`) que n\xE3o existe nesta sess\xE3o: responda os 3 passos (no terminal: digite `/mcp` \u2192 escolha `meta-ads` \u2192 entre com o Facebook; depois feche e abra o `ironoffice`), nunca 'n\xE3o funciona aqui'.",
   "Pedido `trilha: <etapa>` ou `continuar a trilha`: carregue a skill `trilha`, chame `trail_status` antes de agir e `trail_update` depois de medir; nunca marque `provada` sem a prova medida.",
   "Perguntas ao aluno: UMA por mensagem, pela ferramenta `ask` com op\xE7\xF5es quando couber (at\xE9 6) e `skip`; espere a resposta antes da pr\xF3xima; nunca mande lista de perguntas.",
   "A\xE7\xE3o de pedido: o cart\xE3o j\xE1 apareceu acima da sua resposta; diga 'confirme no cart\xE3o acima' em 1 linha, sem repetir o conte\xFAdo do cart\xE3o.",
@@ -17410,7 +17411,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "shop_status",
-    description: "Lista as lojas do aluno no Iron Office: { stores: [{ project_id, name, kind, shopDomain, connected }], active } (active = a loja da \xFAltima mensagem do chat). Funciona em qualquer sess\xE3o (n\xE3o s\xF3 no canal). Primeiro passo do agente iron-shopify.",
+    description: "Lista as lojas do aluno no Iron Office: { stores: [{ project_id, name, kind, shopDomain, timezone, connected }], active } (timezone = fuso IANA da loja, pra mostrar hora no fuso dela; pode vir null) (active = a loja da \xFAltima mensagem do chat). Funciona em qualquer sess\xE3o (n\xE3o s\xF3 no canal). Primeiro passo do agente iron-shopify.",
     inputSchema: { type: "object", properties: {} }
   },
   {
@@ -17424,6 +17425,15 @@ var TOOLS = DEGRADED ? [
         project_id: { type: "string", description: "id da loja (do shop_status). Leitura sem ele: a loja da \xFAltima mensagem. Mutation: passe sempre (sem ele, s\xF3 passa se houver 1 loja conectada)." }
       },
       required: ["query"]
+    }
+  },
+  {
+    name: "store_speed",
+    description: "Mede a nota de velocidade no celular da vitrine da loja (PageSpeed, pelo site, com a chave do Google que fica no servidor): { url, score, top3: [{ id, title, savings_ms }] }. Leva at\xE9 1 minuto; 1 medida por loja por minuto. Erros: 'sem chave' (a nota ainda n\xE3o est\xE1 ligada no site), 'limite' (cota do Google), 'loja sem Shopify'. Funciona em qualquer sess\xE3o.",
+    inputSchema: {
+      type: "object",
+      properties: { project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: \u2026] ou do shop_status)." } },
+      required: ["project_id"]
     }
   },
   {
@@ -17640,6 +17650,18 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(JSON.stringify({ stores: res.stores, active: lastStoreId }));
     } catch (e) {
       return text(`Falhou ao consultar a loja: ${e.message}`, true);
+    }
+  }
+  if (name === "store_speed") {
+    const id = String(args.project_id ?? "").trim();
+    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    try {
+      const res = await api(`/api/stores/${id}/speed`, { timeoutMs: 7e4 });
+      return text(JSON.stringify({ url: res.url ?? null, score: res.score ?? null, top3: Array.isArray(res.top3) ? res.top3.slice(0, 3) : [] }));
+    } catch (e) {
+      if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
+      const why = e.message === "sem chave" ? "a nota de velocidade ainda n\xE3o est\xE1 ligada no site (falta a chave do Google do dono)" : e.message === "limite" ? "o Google limitou as medidas agora; tente de novo mais tarde" : e.message === "loja sem Shopify" ? "essa loja n\xE3o tem a Shopify conectada" : e.status === 404 ? "loja n\xE3o encontrada nesta conta (confira o project_id no shop_status)" : e.name === "AbortError" ? "o PageSpeed demorou demais; tente de novo em 1 minuto" : e.message;
+      return text(`N\xE3o deu pra medir a velocidade: ${why}.`, true);
     }
   }
   if (name === "shop_query") {
