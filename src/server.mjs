@@ -250,7 +250,12 @@ function scrubDeep(v, depth = 0) {
     const entries = Object.entries(v);
     if (entries.length > PROOF_KEYS) throw new Error(`proof com campos demais (${entries.length}; máximo ${PROOF_KEYS}).`);
     const o = {};
-    for (const [k, x] of entries) o[scrubProofText(redactKeys(String(k), 40).text)] = scrubDeep(x, depth + 1);
+    for (const [k, x] of entries) {
+      const key = scrubProofText(redactKeys(String(k), 40).text);
+      // 0.8.1 (gate 27b B1): id da Meta (conta, pixel) tem 15 a 17 dígitos e o filtro de telefone comia o fim dele.
+      // Só em chave `*_id` e só de 15 a 20 dígitos (com ou sem act_): telefone com DDI fica abaixo disso.
+      o[key] = /(^|_)id$/i.test(key) && typeof x === "string" && /^(act_)?\d{15,20}$/.test(x.trim()) ? x.trim() : scrubDeep(x, depth + 1);
+    }
     return o;
   }
   return null;
@@ -743,7 +748,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         : e.status === 404 ? "loja não encontrada nesta conta (confira o project_id no shop_status)"
         : e.name === "AbortError" ? "o PageSpeed demorou demais; tente de novo em 1 minuto"
         : e.message;
-      return text(`Não deu pra medir a velocidade: ${why}.`, true);
+      return text(`Não deu pra medir a velocidade: ${String(why).replace(/[.\s]+$/, "")}.`, true);
     }
   }
 

@@ -17213,7 +17213,10 @@ function scrubDeep(v, depth = 0) {
     const entries = Object.entries(v);
     if (entries.length > PROOF_KEYS) throw new Error(`proof com campos demais (${entries.length}; m\xE1ximo ${PROOF_KEYS}).`);
     const o = {};
-    for (const [k, x] of entries) o[scrubProofText(redactKeys(String(k), 40).text)] = scrubDeep(x, depth + 1);
+    for (const [k, x] of entries) {
+      const key = scrubProofText(redactKeys(String(k), 40).text);
+      o[key] = /(^|_)id$/i.test(key) && typeof x === "string" && /^(act_)?\d{15,20}$/.test(x.trim()) ? x.trim() : scrubDeep(x, depth + 1);
+    }
     return o;
   }
   return null;
@@ -17661,7 +17664,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     } catch (e) {
       if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
       const why = e.message === "sem chave" ? "a nota de velocidade ainda n\xE3o est\xE1 ligada no site (falta a chave do Google do dono)" : e.message === "limite" ? "o Google limitou as medidas agora; tente de novo mais tarde" : e.message === "loja sem Shopify" ? "essa loja n\xE3o tem a Shopify conectada" : e.status === 404 ? "loja n\xE3o encontrada nesta conta (confira o project_id no shop_status)" : e.name === "AbortError" ? "o PageSpeed demorou demais; tente de novo em 1 minuto" : e.message;
-      return text(`N\xE3o deu pra medir a velocidade: ${why}.`, true);
+      return text(`N\xE3o deu pra medir a velocidade: ${String(why).replace(/[.\s]+$/, "")}.`, true);
     }
   }
   if (name === "shop_query") {

@@ -1057,6 +1057,8 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 33, "trail_update", { project_id: LOJA, step: "midias", status: "provada", proof: { produtos: 4, imagens: 12, fora: ["gid://shopify/Product/1234567890123", "https://cdn.exemplo.com/fotos/1234567890.jpg"] } });
   call(s, 34, "trail_update", { project_id: LOJA, step: "midias", status: "provada", proof: { fora: Array.from({ length: 60 }, (_, i) => `img${i}`) } });
   call(s, 35, "trail_update", { project_id: LOJA, step: "midias", status: "provada", proof: { a: { b: { c: { d: { e: { f: 1 } } } } } } });
+  // 0.8.1 (gate 27b B1): ids da Meta (15–17 dígitos) em chave *_id ficam inteiros; telefone em outra chave ou id curto sai
+  call(s, 36, "trail_update", { project_id: LOJA, step: "pixel", status: "provada", proof: { dataset_id: "2368980233921315", account_id: "act_771863663934726", contato_id: "5532984577529", fone: "(32) 98457-7529", server_last_fired_at: "2026-10-29T20:09:56-0700" } });
   call(s, 36, "trail_update", { project_id: LOJA, step: "velocidade", status: "provada", proof: { url: "https://loja-exemplo.com", score: 71, "ana@exemplo.com": 1 } });
   await sleep(1000);
   check("trail_status: GET /api/stores/<id>/trail e devolve o JSON", f.calls.some((c) => c.method === "GET" && c.path === `/api/stores/${LOJA}/trail`) && /"next":"marca"/.test(txt(s, 20)), txt(s, 20));
@@ -1064,7 +1066,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("trail_update: provada sem proof / proof vazio → recusa", err(s, 22) && err(s, 23) && /exige `proof`/.test(txt(s, 22)));
   check("trail_update: pulada sem note, step inválido, status inválido, sem project_id, proof > 2000 → recusa", [24, 25, 26, 27, 28].every((i) => err(s, i)) && /proof grande demais/.test(txt(s, 28)), [24, 25, 26, 27, 28].map((i) => txt(s, i)).join(" | "));
   const posts = f.calls.filter((c) => c.method === "POST" && c.path.endsWith("/trail")).map((c) => c.body);
-  check("trail_update: só as válidas chegam ao site (6)", posts.length === 6, JSON.stringify(posts).slice(0, 300));
+  check("trail_update: só as válidas chegam ao site (7)", posts.length === 7, JSON.stringify(posts).slice(0, 300));
   const byStep = (st) => posts.find((b) => b.step === st && b.status === "provada") ?? {};
   check("gate r1 B1: prova da compra teste chega com o nº do pedido", byStep("compra_teste").proof?.order_name === "#1012" && byStep("compra_teste").proof?.cancelled_at === "2026-10-30T17:12:00Z", JSON.stringify(byStep("compra_teste")));
   check("gate r1: gid e URL na prova não viram telefone", JSON.stringify(byStep("midias").proof?.fora) === JSON.stringify(["gid://shopify/Product/1234567890123", "https://cdn.exemplo.com/fotos/1234567890.jpg"]), JSON.stringify(byStep("midias")));
@@ -1076,6 +1078,9 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("trail_update: pulada leva a note", posts[1]?.status === "pulada" && posts[1]?.note === "não vendo em COD", JSON.stringify(posts[1]));
   check("trail_update: resposta { ok, path, progress }", /"ok":true/.test(txt(s, 29)) && /"next":"marca"/.test(txt(s, 29)), txt(s, 29));
   check("trail_update de outra conta: 404 vira 'Loja não encontrada nesta conta'", err(s, 31) && /Loja não encontrada nesta conta/.test(txt(s, 31)));
+  const px = byStep("pixel").proof ?? {};
+  check("gate 27b B1: id do pixel e da conta (15–17 dígitos, *_id) chegam inteiros", px.dataset_id === "2368980233921315" && px.account_id === "act_771863663934726", JSON.stringify(px));
+  check("gate 27b B1: telefone sai (mesmo numa chave _id, com 13 dígitos) e a data fica", !/98457|5532984577529/.test(JSON.stringify(px)) && px.server_last_fired_at === "2026-10-29T20:09:56-0700", JSON.stringify(px));
   s.p.kill();
   f.srv.close();
 }
