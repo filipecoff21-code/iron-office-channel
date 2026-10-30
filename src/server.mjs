@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.9.0";
+const VERSION = "0.9.1";
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -234,7 +234,7 @@ function scrubSummary(s) {
 const PROOF_DEPTH = 4, PROOF_ITEMS = 50, PROOF_KEYS = 30;
 const EMAIL_RE = /[\w.+-]+@[\w-]+(\.[\w-]+)+/g;
 const PHONE_RE = /(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g;
-// 0.9.0 (onda 28): telefone só quando o número está sozinho (9 a 12 dígitos); id da Meta, número de conta e
+// 0.9.1 (onda 28): telefone só quando o número está sozinho (9 a 12 dígitos); id da Meta, número de conta e
 // dígito corrido maior não casam (a borda (?<!\d)/(?!\d) impede comer o fim de um id de 16 dígitos)
 const ADS_MAX = 8192;
 // gate r1: "32 9 8457-7529" (o 9 solto) também; e @perfil de pessoa em nome de campanha (medido numa conta real) sai
@@ -530,7 +530,7 @@ const TOOLS = DEGRADED
       {
         name: "ads_status",
         description:
-          "Grava no Iron Office o retrato dos anúncios do projeto (skill `anuncios`): números dos últimos 7 dias, campanhas, peças e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot: { v: 1, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED…), spend, results }] (≤10), top_ads: [{ name, campaign, spend, impressions, results }] (≤5), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (≤10), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (≤10) }. Até 8 kB. Só na sessão aberta com ironoffice.",
+          "Grava no Iron Office o retrato dos anúncios do projeto (skill `anuncios`): números dos últimos 7 dias, campanhas, peças e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot: { v: 1, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED…), spend, results, adsets_active, adsets_total (grupos da campanha no ar / total, contados pelo campaign_id) }] (≤10), top_ads: [{ name, campaign, spend, impressions, results }] (≤5), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (≤10), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (≤10) }. Até 8 kB. Só na sessão aberta com ironoffice.",
         inputSchema: {
           type: "object",
           properties: {
@@ -768,7 +768,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
   }
 
-  // 0.9.0 (onda 28): o retrato dos anúncios vai pro site. Todo texto passa pelo filtro de segredo, e-mail e telefone
+  // 0.9.1 (onda 28): o retrato dos anúncios vai pro site. Todo texto passa pelo filtro de segredo, e-mail e telefone
   // (o site recusa o que sobrar); account_id não é texto livre: só act_ + dígitos (o filtro de telefone o comeria).
   if (name === "ads_status") {
     if (mode !== "active") return text(`Esta sessão não grava no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);

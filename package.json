@@ -1,6 +1,6 @@
 {
   "name": "iron-office-channel",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "description": "Canal do Claude Code que liga o dashboard do Iron Office (ironoffice.app) à sessão local do aluno.",
   "type": "module",

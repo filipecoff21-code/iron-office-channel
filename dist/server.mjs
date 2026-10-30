@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.9.0";
+var VERSION = "0.9.1";
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17460,7 +17460,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "ads_status",
-    description: "Grava no Iron Office o retrato dos an\xFAncios do projeto (skill `anuncios`): n\xFAmeros dos \xFAltimos 7 dias, campanhas, pe\xE7as e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot: { v: 1, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED\u2026), spend, results }] (\u226410), top_ads: [{ name, campaign, spend, impressions, results }] (\u22645), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (\u226410), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (\u226410) }. At\xE9 8 kB. S\xF3 na sess\xE3o aberta com ironoffice.",
+    description: "Grava no Iron Office o retrato dos an\xFAncios do projeto (skill `anuncios`): n\xFAmeros dos \xFAltimos 7 dias, campanhas, pe\xE7as e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot: { v: 1, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED\u2026), spend, results, adsets_active, adsets_total (grupos da campanha no ar / total, contados pelo campaign_id) }] (\u226410), top_ads: [{ name, campaign, spend, impressions, results }] (\u22645), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (\u226410), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (\u226410) }. At\xE9 8 kB. S\xF3 na sess\xE3o aberta com ironoffice.",
     inputSchema: {
       type: "object",
       properties: {
