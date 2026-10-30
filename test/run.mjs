@@ -783,11 +783,11 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const OUTRA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const fila = [
     { id: "s1", conversation_id: "c1", content: "em qual loja estamos?", meta: { project_id: LOJA }, created_at: "2026-10-27T00:00:00Z",
-      store: { id: LOJA, name: "Vulkan iok_" + "b".repeat(48), kind: "shopify", slug: "vulkan", ficha_path: null } },
+      store: { id: LOJA, name: "Bravo iok_" + "b".repeat(48), kind: "shopify", slug: "bravo", ficha_path: null } },
   ];
   let segunda = false;
   let soltar = false; // a 2ª mensagem (sem loja) só sai depois das checagens da 1ª
-  let lojas = [{ project_id: LOJA, name: "Vulkan", kind: "shopify", shopDomain: "v.myshopify.com", connected: true }];
+  let lojas = [{ project_id: LOJA, name: "Bravo", kind: "shopify", shopDomain: "v.myshopify.com", connected: true }];
   const f = await fakeOffice((c) => {
     if (c.path === "/api/chat/pull") {
       const m = fila.splice(0, 1);
@@ -799,7 +799,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     }
     if (c.path === "/api/shopify/graphql?stores=1") return { json: { stores: lojas } };
     if (c.path === "/api/shopify/graphql" && c.method === "POST" && !c.body.project_id) {
-      return { status: 409, json: { error: "Mais de uma loja conectada: diga qual.", stores: [{ project_id: LOJA, name: "Vulkan" }, { project_id: OUTRA, name: "Cliente teste" }] } };
+      return { status: 409, json: { error: "Mais de uma loja conectada: diga qual.", stores: [{ project_id: LOJA, name: "Bravo" }, { project_id: OUTRA, name: "Cliente teste" }] } };
     }
     if (c.path === "/api/shopify/graphql" && c.method === "POST") return { json: { data: { shop: { name: "ok" } } } };
     if (c.path === "/api/deliverables") return { json: { ok: true, deliverable: { id: "d-1" } } };
@@ -812,9 +812,9 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.handshake();
   await sleep(2500);
   const n1 = notifs(s.out)[0]?.msg.params.content ?? "";
-  check("prefixo [loja: nome · tipo · id · ficha: ainda sem ficha] na 1ª linha (0.7.1: com o id)", n1.startsWith("[loja: Vulkan ") && n1.includes(` · Loja Shopify · id: ${LOJA} · ficha: ainda sem ficha]\nem qual loja estamos?`), JSON.stringify(n1));
+  check("prefixo [loja: nome · tipo · id · ficha: ainda sem ficha] na 1ª linha (0.7.1: com o id)", n1.startsWith("[loja: Bravo ") && n1.includes(` · Loja Shopify · id: ${LOJA} · ficha: ainda sem ficha]\nem qual loja estamos?`), JSON.stringify(n1));
   check("nome da loja passa pelo filtro de segredos", !n1.includes("iok_" + "b".repeat(48)), JSON.stringify(n1));
-  call(s, 2, "reply", { chat_id: "c1", text: "Estamos na Vulkan." });
+  call(s, 2, "reply", { chat_id: "c1", text: "Estamos na Bravo." });
   call(s, 3, "deliver", { title: "T", agent: "iron-ceo", content: "C" });
   call(s, 4, "shop_status", {});
   call(s, 5, "shop_query", { query: "{ shop { name } }" });
@@ -865,12 +865,12 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const LOJA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const fila = [
     { id: "a1", conversation_id: "c1", content: "[sistema] Cancelar o pedido #1001 · sem estorno → executada", meta: { system: "action", action_id: "x", project_id: LOJA }, created_at: "2026-10-28T00:00:00Z",
-      store: { id: LOJA, name: "Vulkan", kind: "shopify", slug: "vulkan", ficha_path: null } },
+      store: { id: LOJA, name: "Bravo", kind: "shopify", slug: "bravo", ficha_path: null } },
   ];
   const f = await fakeOffice((c) => {
     if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: fila.splice(0, 1) } };
     if (c.path === "/api/shopify/graphql" && c.method === "POST" && /orderCancel/.test(c.body.query) && !c.body.project_id) {
-      return { status: 409, json: { error: "Ação de pedido precisa da loja: passe o project_id.", stores: [{ project_id: LOJA, name: "Vulkan" }] } };
+      return { status: 409, json: { error: "Ação de pedido precisa da loja: passe o project_id.", stores: [{ project_id: LOJA, name: "Bravo" }] } };
     }
     if (c.path === "/api/shopify/graphql" && c.method === "POST" && /orderUpdate/.test(c.body.query)) {
       return { status: 202, json: { pending: true, existing: true, action_id: "y", summary: "Nota do pedido #1001: fica: \"Nota A\"", expires_at: "2026-10-28T00:10:00Z" } };
@@ -957,12 +957,12 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 23, "store_update", { project_id: LOJA, ficha_path: "Projetos/loja-exemplo/PROJETO.md" });
   call(s, 24, "store_update", { project_id: LOJA, ficha_path: "Projetos/loja-exemplo/PROJETO.md", summary: "   " });
   // contato e pedido saem do resumo; preço com ponto fica; moeda/país no limite do banco
-  call(s, 25, "store_update", { project_id: LOJA, ficha_path: "Projetos/loja-exemplo/PROJETO.md", summary: "Botas · ticket 1.250.000 COP · sócio joao@exemplo.com (32) 98457-7529 +57 300 1234567 pedido #1008", currency: "COP-LONGO", country: "Colombia do Sul" });
+  call(s, 25, "store_update", { project_id: LOJA, ficha_path: "Projetos/loja-exemplo/PROJETO.md", summary: "Botas · ticket 1.250.000 COP · sócio joao@exemplo.com (32) 91234-5678 +57 300 1234567 pedido #1008", currency: "COP-LONGO", country: "Colombia do Sul" });
   await sleep(900);
   const fichas = f.calls.filter((c) => c.path === `/api/stores/${LOJA}/ficha`).map((c) => c.body);
   check("store_update: resumo ausente ou só espaço não vai no corpo", fichas.length >= 3 && !("summary" in fichas[1]) && !("summary" in fichas[2]), JSON.stringify(fichas.slice(1, 3)));
   const sc = fichas[3]?.summary ?? "";
-  check("store_update: e-mail, telefone e #pedido viram [removido]; preço com ponto fica", !/@|98457|1234567|#1008/.test(sc) && /1\.250\.000 COP/.test(sc) && (sc.match(/\[removido\]/g) || []).length === 4, sc);
+  check("store_update: e-mail, telefone e #pedido viram [removido]; preço com ponto fica", !/@|91234|1234567|#1008/.test(sc) && /1\.250\.000 COP/.test(sc) && (sc.match(/\[removido\]/g) || []).length === 4, sc);
   check("store_update: moeda e país cortados em 8", fichas[3]?.currency === "COP-LONG" && fichas[3]?.country === "Colombia", JSON.stringify(fichas[3]));
   call(s, 22, "store_update", { project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ficha_path: "Projetos/x/PROJETO.md", summary: "x" });
   await sleep(600);
@@ -984,11 +984,11 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
   const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
   const snap = (extra = {}) => ({
-    v: 1, at: "2026-10-30T17:55:00-03:00", account_id: "act_2368980233921315", account_name: "Conta da loja", currency: "BRL", window_days: 7,
+    v: 1, at: "2026-10-30T17:55:00-03:00", account_id: "act_1000000000000002", account_name: "Conta da loja", currency: "BRL", window_days: 7,
     spend: 152.4, impressions: 10000, clicks: 200, results: 6, result_label: "compras",
     campaigns: [{ name: "Vendas", status: "ACTIVE", spend: 152.4, results: 6, adsets_active: 0, adsets_total: 2 }],
     top_ads: [{ name: "Peça fale (31) 99999-9999", campaign: "Vendas", spend: 100, impressions: 8000, results: 5 },
-      { name: "Vaga @perfil_da.pessoa · zap 32 9 8457-7529", campaign: "Turma 2025-2026 · 2026-10-30 14:30 · R$ 1.250,00", spend: 1 }],
+      { name: "Vaga @perfil_da.pessoa · zap 32 9 1234-5678", campaign: "Turma 2025-2026 · 2026-10-30 14:30 · R$ 1.250,00", spend: 1 }],
     alerts: [{ kind: "data_vencida", ad: "Turma 25/10 · id 120211234567890123", campaign: "Vendas", detail: "a data 25/10 já passou; contato joao@exemplo.com", action: "pausar ou trocar a peça" }],
     checked: { ads: 3, copy: 3, art: false }, ramp: [], ...extra,
   });
@@ -1018,7 +1018,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("ads_status: POST com a chave e resposta { ok, saved_at }", /"ok":true/.test(txt(s, 10)) && /2026-10-30T18:00/.test(txt(s, 10)) && posts[0]?.key === KEY, txt(s, 10));
   check("ads_status: telefone no nome da peça e e-mail no detalhe viram [removido]", body.top_ads?.[0]?.name === "Peça fale [removido]" && /\[removido\]/.test(body.alerts?.[0]?.detail ?? "") && !/@/.test(JSON.stringify(body)), JSON.stringify(body.top_ads?.[0]) + " " + body.alerts?.[0]?.detail);
   check("ads_status (gate r1): @perfil e celular com o 9 solto viram [removido]; ano, data, hora e preço ficam", body.top_ads?.[1]?.name === "Vaga [removido] · zap [removido]" && body.top_ads?.[1]?.campaign === "Turma 2025-2026 · 2026-10-30 14:30 · R$ 1.250,00", JSON.stringify(body.top_ads?.[1]));
-  check("ads_status: id da Meta (conta e no nome) não vira [removido]", body.account_id === "act_2368980233921315" && /120211234567890123/.test(body.alerts?.[0]?.ad ?? ""), body.account_id + " " + body.alerts?.[0]?.ad);
+  check("ads_status: id da Meta (conta e no nome) não vira [removido]", body.account_id === "act_1000000000000002" && /120211234567890123/.test(body.alerts?.[0]?.ad ?? ""), body.account_id + " " + body.alerts?.[0]?.ad);
   check("ads_status (0.9.1): grupos da campanha (adsets_active/adsets_total) chegam ao site como número", body.campaigns?.[0]?.adsets_active === 0 && body.campaigns?.[0]?.adsets_total === 2, JSON.stringify(body.campaigns?.[0]));
   const desc = s.out.find((o) => o.msg.id === 15)?.msg.result.tools.find((t) => t.name === "ads_status")?.description ?? "";
   check("ads_status (0.9.1): a descrição pede adsets_active e adsets_total", /adsets_active/.test(desc) && /adsets_total/.test(desc), desc.slice(0, 80));
@@ -1108,7 +1108,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 27, "trail_update", { step: "idioma", status: "em_andamento" });
   call(s, 28, "trail_update", { project_id: LOJA, step: "midias", status: "provada", proof: { fora: ["x".repeat(2100)] } });
   await sleep(800);
-  call(s, 29, "trail_update", { project_id: LOJA, step: "idioma", status: "provada", proof: { primary: "es", market: "CO", contato: "ana@exemplo.com (32) 98457-7529", token: "iok_" + "f".repeat(48), lista: [{ dono: "joao@x.com" }] }, path: "tem_loja" });
+  call(s, 29, "trail_update", { project_id: LOJA, step: "idioma", status: "provada", proof: { primary: "es", market: "CO", contato: "ana@exemplo.com (32) 91234-5678", token: "iok_" + "f".repeat(48), lista: [{ dono: "joao@x.com" }] }, path: "tem_loja" });
   call(s, 30, "trail_update", { project_id: LOJA, step: "obrigado", status: "pulada", note: "não vendo em COD" });
   call(s, 31, "trail_update", { project_id: OUTRA, step: "idioma", status: "em_andamento" });
   // gate r1: a prova exata de cada steps/*.md da skill trilha chega inteira (B1: o nº do pedido fica)
@@ -1117,7 +1117,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 34, "trail_update", { project_id: LOJA, step: "midias", status: "provada", proof: { fora: Array.from({ length: 60 }, (_, i) => `img${i}`) } });
   call(s, 35, "trail_update", { project_id: LOJA, step: "midias", status: "provada", proof: { a: { b: { c: { d: { e: { f: 1 } } } } } } });
   // 0.8.1 (gate 27b B1): ids da Meta (15–17 dígitos) em chave *_id ficam inteiros; telefone em outra chave ou id curto sai
-  call(s, 36, "trail_update", { project_id: LOJA, step: "pixel", status: "provada", proof: { dataset_id: "2368980233921315", account_id: "act_771863663934726", contato_id: "5532984577529", fone: "(32) 98457-7529", server_last_fired_at: "2026-10-29T20:09:56-0700" } });
+  call(s, 36, "trail_update", { project_id: LOJA, step: "pixel", status: "provada", proof: { dataset_id: "1000000000000002", account_id: "act_100000000000001", contato_id: "5532912345678", fone: "(32) 91234-5678", server_last_fired_at: "2026-10-29T20:09:56-0700" } });
   call(s, 36, "trail_update", { project_id: LOJA, step: "velocidade", status: "provada", proof: { url: "https://loja-exemplo.com", score: 71, "ana@exemplo.com": 1 } });
   await sleep(1000);
   check("trail_status: GET /api/stores/<id>/trail e devolve o JSON", f.calls.some((c) => c.method === "GET" && c.path === `/api/stores/${LOJA}/trail`) && /"next":"marca"/.test(txt(s, 20)), txt(s, 20));
@@ -1133,13 +1133,13 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("gate r1: e-mail como nome de campo também sai", !JSON.stringify(byStep("velocidade").proof ?? {}).includes("@") && byStep("velocidade").proof?.score === 71, JSON.stringify(byStep("velocidade")));
   const pv = posts[0] ?? {};
   check("trail_update: corpo { step, status, proof, path }", pv.step === "idioma" && pv.status === "provada" && pv.proof?.primary === "es" && pv.proof?.market === "CO" && pv.path === "tem_loja", JSON.stringify(pv));
-  check("trail_update: e-mail, telefone e chave saem da prova (até dentro de lista)", !/@|98457|f{48}/.test(JSON.stringify(pv.proof)), JSON.stringify(pv.proof));
+  check("trail_update: e-mail, telefone e chave saem da prova (até dentro de lista)", !/@|91234|f{48}/.test(JSON.stringify(pv.proof)), JSON.stringify(pv.proof));
   check("trail_update: pulada leva a note", posts[1]?.status === "pulada" && posts[1]?.note === "não vendo em COD", JSON.stringify(posts[1]));
   check("trail_update: resposta { ok, path, progress }", /"ok":true/.test(txt(s, 29)) && /"next":"marca"/.test(txt(s, 29)), txt(s, 29));
   check("trail_update de outra conta: 404 vira 'Loja não encontrada nesta conta'", err(s, 31) && /Loja não encontrada nesta conta/.test(txt(s, 31)));
   const px = byStep("pixel").proof ?? {};
-  check("gate 27b B1: id do pixel e da conta (15–17 dígitos, *_id) chegam inteiros", px.dataset_id === "2368980233921315" && px.account_id === "act_771863663934726", JSON.stringify(px));
-  check("gate 27b B1: telefone sai (mesmo numa chave _id, com 13 dígitos) e a data fica", !/98457|5532984577529/.test(JSON.stringify(px)) && px.server_last_fired_at === "2026-10-29T20:09:56-0700", JSON.stringify(px));
+  check("gate 27b B1: id do pixel e da conta (15–17 dígitos, *_id) chegam inteiros", px.dataset_id === "1000000000000002" && px.account_id === "act_100000000000001", JSON.stringify(px));
+  check("gate 27b B1: telefone sai (mesmo numa chave _id, com 13 dígitos) e a data fica", !/91234|5532912345678/.test(JSON.stringify(px)) && px.server_last_fired_at === "2026-10-29T20:09:56-0700", JSON.stringify(px));
   s.p.kill();
   f.srv.close();
 }

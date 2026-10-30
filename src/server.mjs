@@ -197,7 +197,7 @@ const state = {
 let lastStoreId = null;
 const KIND_LABEL = { shopify: "Loja Shopify", cliente: "Cliente", negocio: "Negócio sem loja" };
 
-// "[loja: Vulkan · Loja Shopify · id: <uuid> · ficha: Lojas/vulkan/ficha.md]" — nome e caminho passam pelo filtro de
+// "[loja: Bravo · Loja Shopify · id: <uuid> · ficha: Lojas/bravo/ficha.md]" — nome e caminho passam pelo filtro de
 // segredos. 0.7.1 (onda 26c): o id vai junto, pro modelo escrever na loja da mensagem sem precisar do shop_status.
 function storePrefix(store) {
   if (!store || typeof store !== "object" || typeof store.id !== "string") return "";
@@ -223,7 +223,7 @@ const BAD_FICHA_PATH = /^[\/~]|^[A-Za-z]:|(^|\/)\.\.(\/|$)|[\u0000-\u001f\u007f]
 function scrubSummary(s) {
   return s
     .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "[removido]")
-    // telefone: (32) 98457-7529, +57 300 1234567, 11999998888 (preço com ponto, 1.250.000, não casa)
+    // telefone: (32) 91234-5678, +57 300 1234567, 11999998888 (preço com ponto, 1.250.000, não casa)
     .replace(/(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g, "[removido]")
     .replace(/#\d{3,}/g, "[removido]");
 }
@@ -237,7 +237,7 @@ const PHONE_RE = /(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g;
 // 0.9.1 (onda 28): telefone só quando o número está sozinho (9 a 12 dígitos); id da Meta, número de conta e
 // dígito corrido maior não casam (a borda (?<!\d)/(?!\d) impede comer o fim de um id de 16 dígitos)
 const ADS_MAX = 8192;
-// gate r1: "32 9 8457-7529" (o 9 solto) também; e @perfil de pessoa em nome de campanha (medido numa conta real) sai
+// gate r1: "32 9 1234-5678" (o 9 solto) também; e @perfil de pessoa em nome de campanha (medido numa conta real) sai
 const ADS_PHONE_RE = /(?<!\d)(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s.-]?(?:9[\s.-]?)?\d{3,5}[\s.-]?\d{4}(?!\d)/g;
 const ADS_HANDLE_RE = /(?<![\w.@])@[A-Za-z0-9_.]{2,30}/g;
 function scrubAdsText(s) {
