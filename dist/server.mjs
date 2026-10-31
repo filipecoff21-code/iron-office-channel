@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.10.1";
+var VERSION = "0.11.0";
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17188,6 +17188,27 @@ function storePrefix(store) {
 `;
 }
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var HANDLE_RE = /^[a-z0-9-]{1,255}$/;
+var VARIANT_GID_RE = /^gid:\/\/shopify\/ProductVariant\/\d{1,20}$/;
+function imageReferenceArg(r) {
+  if (r === void 0 || r === null) return { value: void 0 };
+  if (typeof r !== "object" || Array.isArray(r)) return { error: "reference: { product_handle, variant_id?, media_index? }." };
+  if (typeof r.product_handle !== "string" || !HANDLE_RE.test(r.product_handle)) return { error: "reference.product_handle: o handle do produto na Shopify." };
+  const out = { product_handle: r.product_handle };
+  if (r.variant_id !== void 0 && r.variant_id !== null && r.variant_id !== "") {
+    if (typeof r.variant_id !== "string" || !VARIANT_GID_RE.test(r.variant_id)) return { error: "reference.variant_id: gid://shopify/ProductVariant/<n\xFAmero>." };
+    out.variant_id = r.variant_id;
+  }
+  if (r.media_index !== void 0 && r.media_index !== null) {
+    if (!Number.isInteger(r.media_index) || r.media_index < 0 || r.media_index > 9) return { error: "reference.media_index: de 0 a 9." };
+    out.media_index = r.media_index;
+  }
+  return { value: out };
+}
+function refPick(r) {
+  if (!r || typeof r !== "object") return {};
+  return { reference: { product: typeof r.product === "string" ? redactKeys(r.product, 120).text : null, photo: typeof r.photo === "string" ? r.photo.slice(0, 80) : null } };
+}
 var BAD_FICHA_PATH = /^[\/~]|^[A-Za-z]:|(^|\/)\.\.(\/|$)|[\u0000-\u001f\u007f]/;
 function scrubSummary(s) {
   return s.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "[removido]").replace(/(?:\+\d{1,3}[\s-]?)?\(?\d{2,3}\)?[\s-]?\d{3,5}[\s-]?\d{4}\b/g, "[removido]").replace(/#\d{3,}/g, "[removido]");
@@ -17313,7 +17334,7 @@ var INSTRUCTIONS = DEGRADED ? [
   "`reply`, `deliver` e as LEITURAS do `shop_query` v\xE3o pra loja da \xFAltima mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: \u2026]`, ou o `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
   "Pedido `/mcp`, 'ligar a Meta' ou ferramenta da Meta (`mcp__meta-ads__*`) que n\xE3o existe nesta sess\xE3o: responda os 3 passos (no terminal: digite `/mcp` \u2192 escolha `meta-ads` \u2192 entre com o Facebook; depois feche e abra o `ironoffice`), nunca 'n\xE3o funciona aqui'.",
   "Pedido `an\xFAncios: atualizar` (bot\xE3o do site) ou 'como est\xE3o meus an\xFAncios': carregue a skill `anuncios`; o retrato vai pro site pela ferramenta `ads_status`.",
-  "Pedido de imagem ('gera uma imagem', 'varia\xE7\xE3o da imagem <id>'): carregue a skill `imagens`; custo pelo `image_generate` com dry_run e o sim pelo `ask` antes de gerar.",
+  "Pedido de imagem ('gera uma imagem', 'varia\xE7\xE3o da imagem <id>', 'sobe essa na Shopify', 'tira essa da Shopify'): carregue a skill `imagens`; custo pelo `image_generate` com dry_run e o sim pelo `ask` antes de gerar; subir na Shopify s\xF3 pelo `image_to_shopify` depois do sim no `ask`.",
   "Pedido `trilha: <etapa>` ou `continuar a trilha`: carregue a skill `trilha`, chame `trail_status` antes de agir e `trail_update` depois de medir; nunca marque `provada` sem a prova medida.",
   "Perguntas ao aluno: UMA por mensagem, pela ferramenta `ask` com op\xE7\xF5es quando couber (at\xE9 6) e `skip`; espere a resposta antes da pr\xF3xima; nunca mande lista de perguntas.",
   "A\xE7\xE3o de pedido: o cart\xE3o j\xE1 apareceu acima da sua resposta; diga 'confirme no cart\xE3o acima' em 1 linha, sem repetir o conte\xFAdo do cart\xE3o.",
@@ -17474,9 +17495,35 @@ var TOOLS = DEGRADED ? [
         n: { type: "integer", minimum: 1, maximum: 4, description: "quantas imagens (1 a 4; padr\xE3o 1)." },
         product_handle: { type: "string", description: "opcional: handle do produto na Shopify." },
         dry_run: { type: "boolean", description: "true = s\xF3 o custo estimado, o saldo do dia e o quote, sem gerar." },
-        quote: { type: "string", description: "o `quote` que o dry_run devolveu (obrigat\xF3rio pra gerar)." }
+        quote: { type: "string", description: "o `quote` que o dry_run devolveu (obrigat\xF3rio pra gerar)." },
+        reference: {
+          type: "object",
+          description: "0.11.0: a FOTO REAL do produto na Shopify como refer\xEAncia (s\xF3 OpenAI). O site escolhe e baixa a foto; aqui s\xF3 qual: product_handle (obrigat\xF3rio), variant_id (gid://shopify/ProductVariant/<n>, a foto da variante) ou media_index (0\u20139, a posi\xE7\xE3o na p\xE1gina; 0 = a 1\xAA). Mande o MESMO reference no dry_run e no gerar (o quote cobre a foto).",
+          properties: {
+            product_handle: { type: "string" },
+            variant_id: { type: "string" },
+            media_index: { type: "integer", minimum: 0, maximum: 9 }
+          },
+          required: ["product_handle"]
+        }
       },
       required: ["project_id", "prompt", "destination"]
+    }
+  },
+  {
+    name: "image_to_shopify",
+    description: "0.11.0: p\xF5e uma imagem da aba Imagens na p\xE1gina do produto da Shopify da MESMA loja (o site sobe; a imagem entra no fim das fotos e fica vis\xEDvel na loja na hora), ou tira (remove: true). SEMPRE antes de subir: pergunte pelo `ask` \"Subo a imagem na p\xE1gina do produto <t\xEDtulo>? Fica vis\xEDvel na loja na hora. Se n\xE3o gostar, \xE9 s\xF3 pedir pra tirar.\" (Sim / N\xE3o) e s\xF3 chame no Sim; nunca suba sem o sim. variant_ids prende a foto em variantes do produto (at\xE9 10, gid://shopify/ProductVariant/<n>, do shop_query). Resposta: { ok, media_id, status: 'pronta' | 'processando', product_url? } ou { ok: true, removed } ou { ok: false, reason, error }. S\xF3 na sess\xE3o aberta com ironoffice.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        image_id: { type: "string", description: "o id da imagem (o `id` que o image_generate devolveu)." },
+        project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: \u2026] ou do shop_status)." },
+        product_handle: { type: "string", description: "handle do produto na Shopify (obrigat\xF3rio pra subir)." },
+        variant_ids: { type: "array", items: { type: "string" }, maxItems: 10, description: "opcional: variantes onde prender a foto." },
+        alt: { type: "string", description: "opcional: texto alternativo da foto (\u2264 120; sem e-mail nem telefone). Sem ele, o t\xEDtulo do produto." },
+        remove: { type: "boolean", description: "true = tira a imagem da Shopify (desfaz o subir)." }
+      },
+      required: ["image_id", "project_id"]
     }
   },
   {
@@ -17739,6 +17786,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const n = args.n === void 0 || args.n === null ? 1 : args.n;
     if (!Number.isInteger(n) || n < 1 || n > 4) return text("n: de 1 a 4 imagens por pedido.", true);
     if (args.dry_run !== void 0 && args.dry_run !== null && typeof args.dry_run !== "boolean") return text("dry_run tem que ser true ou false.", true);
+    const refArg = imageReferenceArg(args.reference);
+    if (refArg.error) return text(refArg.error, true);
     const body = {
       prompt: scrubAdsText(prompt).slice(0, 1e3),
       request_text: typeof args.request_text === "string" ? scrubAdsText(args.request_text.trim()).slice(0, 1e3) : void 0,
@@ -17748,13 +17797,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       n,
       product_handle: typeof args.product_handle === "string" ? args.product_handle : void 0,
       dry_run: args.dry_run === true,
-      quote: typeof args.quote === "string" ? args.quote.slice(0, 120) : void 0
+      quote: typeof args.quote === "string" ? args.quote.slice(0, 120) : void 0,
+      reference: refArg.value
     };
     try {
       const res = await api(`/api/stores/${id}/images`, { method: "POST", body, timeoutMs: 18e4 });
       const page = (imgId) => typeof imgId === "string" && UUID_RE.test(imgId) ? `${BASE}/images?image=${imgId}` : null;
       const imgs = Array.isArray(res.images) ? res.images.slice(0, 4).map((i) => ({ id: i?.id ?? null, url: page(i?.id) })) : [];
-      const pick2 = res.dry_run ? { ok: true, dry_run: true, provider: res.provider ?? null, destination: res.destination ?? null, n: res.n ?? n, estimate_usd: res.estimate_usd ?? null, cap_usd: res.cap_usd ?? null, cap_left_usd: res.cap_left_usd ?? null, fits: res.fits ?? null, quote: typeof res.quote === "string" ? res.quote : null } : {
+      const pick2 = res.dry_run ? { ok: true, dry_run: true, provider: res.provider ?? null, destination: res.destination ?? null, n: res.n ?? n, estimate_usd: res.estimate_usd ?? null, cap_usd: res.cap_usd ?? null, cap_left_usd: res.cap_left_usd ?? null, fits: res.fits ?? null, quote: typeof res.quote === "string" ? res.quote : null, ...refPick(res.reference) } : {
         ok: res.ok === true,
         id: res.id ?? null,
         url: page(res.id),
@@ -17765,6 +17815,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         cost_kind: res.cost_kind ?? null,
         cap_left_usd: res.cap_left_usd ?? null,
         ...imgs.length > 1 ? { images: imgs } : {},
+        ...refPick(res.reference),
         ...res.partial ? { partial: true, generated: res.generated ?? null, saved: res.saved ?? null } : {}
       };
       return text(JSON.stringify(pick2));
@@ -17775,6 +17826,37 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const d = e.data && typeof e.data === "object" ? e.data : {};
       const reason = typeof d.reason === "string" ? d.reason.slice(0, 40) : e.status === 400 ? "pedido inv\xE1lido" : "erro";
       return text(JSON.stringify({ ok: false, reason, error: redactKeys(String(e.message ?? ""), 300).text, cap_left_usd: d.cap_left_usd ?? null }), true);
+    }
+  }
+  if (name === "image_to_shopify") {
+    if (mode !== "active") return text(`Esta sess\xE3o n\xE3o mexe na Shopify pelo Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
+    const imageId = typeof args.image_id === "string" ? args.image_id.trim() : "";
+    const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
+    if (!UUID_RE.test(imageId)) return text("image_id inv\xE1lido: use o `id` que o image_generate devolveu.", true);
+    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    try {
+      if (args.remove === true) {
+        const res2 = await api(`/api/images/${imageId}/shopify`, { method: "DELETE", timeoutMs: 3e4 });
+        return text(JSON.stringify({ ok: res2.ok === true, removed: res2.removed === true }));
+      }
+      if (typeof args.product_handle !== "string" || !HANDLE_RE.test(args.product_handle)) return text("product_handle: o handle do produto na Shopify.", true);
+      const variants = args.variant_ids === void 0 || args.variant_ids === null ? [] : args.variant_ids;
+      if (!Array.isArray(variants) || variants.length > 10 || !variants.every((v) => typeof v === "string" && VARIANT_GID_RE.test(v))) return text("variant_ids: at\xE9 10, no formato gid://shopify/ProductVariant/<n\xFAmero>.", true);
+      const alt = typeof args.alt === "string" ? scrubAdsText(args.alt.trim()).slice(0, 120) : void 0;
+      const res = await api(`/api/images/${imageId}/shopify`, { method: "POST", body: { product_handle: args.product_handle, ...variants.length ? { variant_ids: variants } : {}, ...alt ? { alt } : {} }, timeoutMs: 1e5 });
+      return text(JSON.stringify({
+        ok: res.ok === true,
+        media_id: typeof res.media_id === "string" ? res.media_id : null,
+        status: res.status === "processando" ? "processando" : "pronta",
+        ...typeof res.product_url === "string" && /^https:\/\//.test(res.product_url) ? { product_url: res.product_url.slice(0, 300) } : {},
+        ...res.status === "processando" ? { error: "A Shopify ainda est\xE1 processando; confira a p\xE1gina do produto em 1 minuto." } : {}
+      }));
+    } catch (e) {
+      if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
+      if (e.name === "AbortError") return text(JSON.stringify({ ok: false, reason: "sem resposta", error: "O site n\xE3o respondeu a tempo. Confira o detalhe da imagem na aba Imagens antes de pedir de novo." }), true);
+      const d = e.data && typeof e.data === "object" ? e.data : {};
+      const reason = typeof d.reason === "string" ? d.reason.slice(0, 40) : e.status === 404 ? "n\xE3o achou" : "erro";
+      return text(JSON.stringify({ ok: false, reason, error: redactKeys(String(e.message ?? ""), 300).text }), true);
     }
   }
   if (name === "store_speed") {

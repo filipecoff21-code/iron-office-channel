@@ -1047,13 +1047,16 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 
 // ─── 16b. image_generate (0.10.0, onda 29a) ───────────────────────────────
 {
-  console.log("image_generate (0.10.0)");
+  console.log("image_generate (0.10.0) · image_to_shopify (0.11.0)");
   const LOJA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
   const IMG = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
   const IMG2 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const f = await fakeOffice((c) => {
     if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === `/api/images/${IMG}/shopify` && c.method === "POST") return { status: 202, json: { ok: true, media_id: "gid://shopify/MediaImage/9", status: "processando", product_url: "https://loja.com/products/bota", url_assinada: "https://x.supabase.co/sign?token=SEGREDO" } };
+    if (c.path === `/api/images/${IMG}/shopify` && c.method === "DELETE") return { json: { ok: true, removed: true } };
     if (c.path === `/api/stores/${LOJA}/images` && c.method === "POST") {
+      if (c.body?.reference && c.body?.dry_run) return { json: { ok: true, dry_run: true, provider: "openai", estimate_usd: 0.0529, cap_usd: 2, cap_left_usd: 2, fits: true, quote: "Q2", reference: { product: "Bota", photo: "foto principal" }, segredo: "x" } };
       if (c.body?.dry_run) return { json: { ok: true, dry_run: true, provider: "openai", model: "gpt-image-2", destination: "feed", n: 1, estimate_usd: 0.0386, cap_usd: 2, cap_left_usd: 2, fits: true, quote: "1800000000000.QQQ", expires_at: "x" } };
       if (c.body?.n === 2) return { json: { ok: true, id: IMG, width: 1080, height: 1080, provider: "fal", cost_usd: 0.06, cost_kind: "estimado", cap_left_usd: 1, images: [{ id: IMG, url: "https://x.supabase.co/a?token=t" }, { id: IMG2, url: "https://x.supabase.co/b?token=t" }] } };
       if (c.body?.destination === "story") return { json: { ok: true, id: "img-nao-uuid", url: "https://x.supabase.co/c?token=t", width: 1080, height: 1920 } };
@@ -1070,8 +1073,10 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   p.handshake();
   await sleep(1500);
   call(p, 2, base);
+  p.send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "image_to_shopify", arguments: { image_id: IMG, project_id: LOJA, product_handle: "bota" } } });
   await sleep(500);
   check("image_generate fora do canal: recusa sem chamar o site", res(p, 2)?.isError === true && !f.calls.some((c) => c.path.endsWith("/images")), txt(p, 2));
+  check("image_to_shopify fora do canal: recusa sem chamar o site", res(p, 3)?.isError === true && !f.calls.some((c) => c.path.endsWith("/shopify")), txt(p, 3));
   p.p.kill();
 
   const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
@@ -1086,6 +1091,14 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 17, { ...base, quote: "1800000000000.QQQ" });
   call(s, 18, { ...base, n: 2 });
   call(s, 19, { ...base, destination: "story" });
+  call(s, 20, { ...base, dry_run: true, reference: { product_handle: "bota", media_index: 0, url: "https://evil.com/x.png" } });
+  call(s, 21, { ...base, reference: { product_handle: "Bota X" } });
+  call(s, 22, { ...base, reference: { product_handle: "bota", variant_id: "11" } });
+  const shop = (id, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "image_to_shopify", arguments: args } });
+  shop(23, { image_id: IMG, project_id: LOJA, product_handle: "bota", alt: "fale com ana@x.com (31) 91234-5678" });
+  shop(24, { image_id: IMG, project_id: LOJA, product_handle: "bota", variant_ids: Array(11).fill("gid://shopify/ProductVariant/1") });
+  shop(25, { image_id: IMG, project_id: LOJA, remove: true });
+  shop(26, { image_id: "x", project_id: LOJA, product_handle: "bota" });
   s.send({ jsonrpc: "2.0", id: 15, method: "tools/list" });
   await sleep(1500);
   const posts = f.calls.filter((c) => c.path.endsWith("/images"));
@@ -1103,6 +1116,19 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("image_generate: n 5 recusado antes de sair", res(s, 12)?.isError === true && !posts.some((c) => c.body?.n === 5), txt(s, 12));
   check("image_generate: limite do dia vira reason + frase", res(s, 13)?.isError === true && /"reason":"limite do dia"/.test(txt(s, 13)) && /"cap_left_usd":0/.test(txt(s, 13)), txt(s, 13));
   check("image_generate: project_id que não é uuid recusado sem rede", res(s, 14)?.isError === true && !posts.some((c) => c.path.includes("..")), txt(s, 14));
+  const refPost = posts.find((c) => c.body?.reference);
+  check("image_generate (0.11.0): reference vai só com os 3 campos (a URL fica pra trás) e volta com produto e foto", refPost && JSON.stringify(refPost.body.reference) === JSON.stringify({ product_handle: "bota", media_index: 0 }) && /"reference":\{"product":"Bota","photo":"foto principal"\}/.test(txt(s, 20)) && !/segredo/.test(txt(s, 20)), JSON.stringify(refPost?.body?.reference) + " " + txt(s, 20));
+  check("image_generate (0.11.0): reference com handle ou variante inválidos recusada antes de sair", res(s, 21)?.isError === true && res(s, 22)?.isError === true && !posts.some((c) => c.body?.reference?.product_handle === "Bota X" || c.body?.reference?.variant_id === "11"), txt(s, 21) + txt(s, 22));
+  const shopCalls = f.calls.filter((c) => c.path.endsWith("/shopify"));
+  const up = shopCalls.find((c) => c.method === "POST");
+  check("image_to_shopify: sobe com handle e alt filtrado (e-mail e telefone viram [removido])", up && up.body.product_handle === "bota" && !/@|91234/.test(up.body.alt) && /\[removido\]/.test(up.body.alt), JSON.stringify(up?.body));
+  const upOut = JSON.parse(txt(s, 23) || "{}");
+  check("image_to_shopify: resposta só com os campos combinados (a URL assinada nunca volta)", JSON.stringify(Object.keys(upOut).sort()) === JSON.stringify(["error", "media_id", "ok", "product_url", "status"]) && upOut.status === "processando" && !/SEGREDO|supabase/.test(txt(s, 23)), txt(s, 23));
+  check("image_to_shopify: variant_ids > 10 recusado antes de sair; image_id inválido recusado", res(s, 24)?.isError === true && res(s, 26)?.isError === true && shopCalls.filter((c) => c.method === "POST").length === 1, txt(s, 24) + txt(s, 26));
+  check("image_to_shopify: remove → DELETE", shopCalls.some((c) => c.method === "DELETE") && /"removed":true/.test(txt(s, 25)), txt(s, 25));
+  const tools = s.out.find((o) => o.msg.id === 15)?.msg.result?.tools ?? [];
+  const shopTool = tools.find((t) => t.name === "image_to_shopify");
+  check("image_to_shopify: a descrição manda perguntar pelo ask antes de subir", /`ask`/.test(shopTool?.description ?? "") && /nunca suba sem o sim/.test(shopTool?.description ?? ""), (shopTool?.description ?? "").slice(0, 80));
   const tool = s.out.find((o) => o.msg.id === 15)?.msg.result?.tools?.find((t) => t.name === "image_generate");
   check("image_generate: a descrição manda dry_run + ask + quote antes de gerar", /dry_run: true/.test(tool?.description ?? "") && /`ask`/.test(tool?.description ?? "") && /só gere no Sim/.test(tool?.description ?? "") && /quote/.test(tool?.description ?? ""), (tool?.description ?? "").slice(0, 80));
   s.p.kill();
