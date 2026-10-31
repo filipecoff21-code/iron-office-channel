@@ -532,7 +532,7 @@ const TOOLS = DEGRADED
       {
         name: "image_generate",
         description:
-          "Gera imagem da loja pelo Iron Office (skill `imagens`): o SITE chama o provedor (OpenAI gpt-image-2 ou fal flux/dev) com a chave do aluno, que fica cifrada no servidor e nunca vem pra cá; recorta pro destino e guarda na aba Imagens da loja. SEMPRE: 1) chame com dry_run: true pra saber o custo (estimate_usd) e o saldo do dia (cap_left_usd); 2) pergunte ao aluno pelo `ask` \"Vai custar ≈ US$ X na sua conta da <provedor>. Gero?\" e só gere no Sim. Destinos: feed 1080×1350 · story 1080×1920 · quadrado 1080×1080 · banner 1920×1080. Resposta: { ok, id, url (link de 1 h), width, height, provider, cost_usd, cost_kind (estimado|medido), cap_left_usd } ou { ok: false, reason: 'sem provedor' | 'limite do dia' | 'por minuto' | 'provedor recusou' | 'provedor fora', error }. O prompt passa por filtro (e-mail, telefone e chave viram [removido]). Leva até 2 min. Só na sessão aberta com ironoffice.",
+          "Gera imagem da loja pelo Iron Office (skill `imagens`): o SITE chama o provedor (OpenAI gpt-image-2 ou fal flux/dev) com a chave do aluno, que fica cifrada no servidor e nunca vem pra cá; recorta pro destino e guarda na aba Imagens da loja. SEMPRE: 1) chame com dry_run: true pra saber o custo (estimate_usd), o saldo do dia (cap_left_usd) e receber o `quote` (orçamento, vale 15 min); 2) pergunte ao aluno pelo `ask` \"Vai custar ≈ US$ X na sua conta da <provedor>. Gero?\" e só gere no Sim, mandando o MESMO pedido com o `quote` (sem ele, ou com outro pedido, o site não gera: reason 'sem orçamento'). Destinos: feed 1080×1350 · story 1080×1920 · quadrado 1080×1080 · banner 1920×1080. Resposta: { ok, id, url (link de 1 h), width, height, provider, cost_usd, cost_kind (estimado|medido), cap_left_usd, images (com n > 1), partial? } ou { ok: false, reason: 'sem provedor' | 'sem orçamento' | 'limite do dia' | 'por minuto' | 'provedor recusou' | 'provedor fora' | 'sem resposta' | 'gravar', error }. 'provedor fora', 'sem resposta' e 'gravar' podem ter cobrado: mande o aluno conferir a aba Imagens antes de pedir de novo. O prompt passa por filtro (e-mail, telefone e chave viram [removido]). Leva até 2 min. Só na sessão aberta com ironoffice.",
         inputSchema: {
           type: "object",
           properties: {
@@ -544,7 +544,8 @@ const TOOLS = DEGRADED
             provider:       { type: "string", enum: ["openai", "fal"], description: "opcional; sem ele, a OpenAI se conectada, senão o fal." },
             n:              { type: "integer", minimum: 1, maximum: 4, description: "quantas imagens (1 a 4; padrão 1)." },
             product_handle: { type: "string", description: "opcional: handle do produto na Shopify." },
-            dry_run:        { type: "boolean", description: "true = só o custo estimado e o saldo do dia, sem gerar." },
+            dry_run:        { type: "boolean", description: "true = só o custo estimado, o saldo do dia e o quote, sem gerar." },
+            quote:          { type: "string", description: "o `quote` que o dry_run devolveu (obrigatório pra gerar)." },
           },
           required: ["project_id", "prompt", "destination"],
         },
@@ -827,23 +828,29 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (prompt.length > 1000) return text("O prompt passou de 1.000 caracteres: encurte.", true);
     const n = args.n === undefined || args.n === null ? 1 : args.n;
     if (!Number.isInteger(n) || n < 1 || n > 4) return text("n: de 1 a 4 imagens por pedido.", true);
+    // gate r1: "true" ou 1 seriam geração cobrada; só booleano passa
+    if (args.dry_run !== undefined && args.dry_run !== null && typeof args.dry_run !== "boolean") return text("dry_run tem que ser true ou false.", true);
     const body = {
       prompt: scrubAdsText(prompt).slice(0, 1000),
       request_text: typeof args.request_text === "string" ? scrubAdsText(args.request_text.trim()).slice(0, 1000) : undefined,
       destination: args.destination, label: args.label, provider: args.provider, n,
       product_handle: typeof args.product_handle === "string" ? args.product_handle : undefined,
       dry_run: args.dry_run === true,
+      quote: typeof args.quote === "string" ? args.quote.slice(0, 120) : undefined,
     };
     try {
       const res = await api(`/api/stores/${id}/images`, { method: "POST", body, timeoutMs: 180_000 });
+      const imgs = Array.isArray(res.images) ? res.images.slice(0, 4).map((i) => ({ id: i?.id ?? null, url: i?.url ?? null })) : [];
       const pick = res.dry_run
-        ? { ok: true, dry_run: true, provider: res.provider ?? null, destination: res.destination ?? null, n: res.n ?? n, estimate_usd: res.estimate_usd ?? null, cap_usd: res.cap_usd ?? null, cap_left_usd: res.cap_left_usd ?? null, fits: res.fits ?? null }
-        : { ok: res.ok === true, id: res.id ?? null, url: res.url ?? null, width: res.width ?? null, height: res.height ?? null, provider: res.provider ?? null, cost_usd: res.cost_usd ?? null, cost_kind: res.cost_kind ?? null, cap_left_usd: res.cap_left_usd ?? null };
+        ? { ok: true, dry_run: true, provider: res.provider ?? null, destination: res.destination ?? null, n: res.n ?? n, estimate_usd: res.estimate_usd ?? null, cap_usd: res.cap_usd ?? null, cap_left_usd: res.cap_left_usd ?? null, fits: res.fits ?? null, quote: typeof res.quote === "string" ? res.quote : null }
+        : { ok: res.ok === true, id: res.id ?? null, url: res.url ?? null, width: res.width ?? null, height: res.height ?? null, provider: res.provider ?? null, cost_usd: res.cost_usd ?? null, cost_kind: res.cost_kind ?? null, cap_left_usd: res.cap_left_usd ?? null,
+          ...(imgs.length > 1 ? { images: imgs } : {}), ...(res.partial ? { partial: true, generated: res.generated ?? null, saved: res.saved ?? null } : {}) };
       return text(JSON.stringify(pick));
     } catch (e) {
       if (e instanceof AuthError) return text("Chave do Iron Office inválida: refaça o passo 2 em ironoffice.app/onboarding.", true);
       if (e.status === 404) return text("Loja não encontrada nesta conta (confira o project_id no shop_status).", true);
-      if (e.name === "AbortError") return text(JSON.stringify({ ok: false, reason: "provedor fora", error: "O provedor demorou demais; tente de novo em 1 minuto." }), true);
+      // gate r1: o site pode terminar depois dos 180 s e cobrar: não mandar repetir às cegas
+      if (e.name === "AbortError") return text(JSON.stringify({ ok: false, reason: "sem resposta", error: "O site não respondeu em 3 minutos. A imagem pode ter sido gerada e cobrada: confira a aba Imagens antes de pedir de novo." }), true);
       const d = e.data && typeof e.data === "object" ? e.data : {};
       const reason = typeof d.reason === "string" ? d.reason.slice(0, 40) : e.status === 400 ? "pedido inválido" : "erro";
       return text(JSON.stringify({ ok: false, reason, error: redactKeys(String(e.message ?? ""), 300).text, cap_left_usd: d.cap_left_usd ?? null }), true);

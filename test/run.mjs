@@ -1052,7 +1052,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const f = await fakeOffice((c) => {
     if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
     if (c.path === `/api/stores/${LOJA}/images` && c.method === "POST") {
-      if (c.body?.dry_run) return { json: { ok: true, dry_run: true, provider: "openai", model: "gpt-image-2", destination: "feed", n: 1, estimate_usd: 0.0386, cap_usd: 2, cap_left_usd: 2, fits: true } };
+      if (c.body?.dry_run) return { json: { ok: true, dry_run: true, provider: "openai", model: "gpt-image-2", destination: "feed", n: 1, estimate_usd: 0.0386, cap_usd: 2, cap_left_usd: 2, fits: true, quote: "1800000000000.QQQ", expires_at: "x" } };
       if (c.body?.destination === "banner") return { status: 429, json: { ok: false, reason: "limite do dia", cap_left_usd: 0, error: "O limite de hoje acabou (US$ 2)." } };
       return { json: { ok: true, id: "img-1", url: "https://x.supabase.co/sign/u/l/img-1.jpg?token=t", width: 1080, height: 1350, provider: "openai", model: "gpt-image-2", cost_usd: 0.039, cost_kind: "medido", cap_left_usd: 1.961, images: [{}], segredo: "nao-deve-sair" } };
     }
@@ -1078,11 +1078,15 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 12, { ...base, n: 5 });
   call(s, 13, { ...base, destination: "banner" });
   call(s, 14, { ...base, project_id: "../x" });
+  call(s, 16, { ...base, dry_run: "true" });
+  call(s, 17, { ...base, quote: "1800000000000.QQQ" });
   s.send({ jsonrpc: "2.0", id: 15, method: "tools/list" });
   await sleep(1500);
   const posts = f.calls.filter((c) => c.path.endsWith("/images"));
   const real = posts.find((c) => !c.body?.dry_run && c.body?.destination === "feed");
-  check("image_generate: dry_run devolve custo e saldo", /"estimate_usd":0.0386/.test(txt(s, 10)) && /"cap_left_usd":2/.test(txt(s, 10)), txt(s, 10));
+  check("image_generate: dry_run devolve custo, saldo e o quote", /"estimate_usd":0.0386/.test(txt(s, 10)) && /"cap_left_usd":2/.test(txt(s, 10)) && /"quote":"1800000000000.QQQ"/.test(txt(s, 10)), txt(s, 10));
+  check("image_generate (gate r1): dry_run \"true\" (texto) recusado antes de sair, nunca vira geração", res(s, 16)?.isError === true && !posts.some((c) => c.body?.dry_run === "true"), txt(s, 16));
+  check("image_generate (gate r1): o quote vai junto no pedido de gerar", posts.some((c) => c.body?.quote === "1800000000000.QQQ" && !c.body?.dry_run), JSON.stringify(posts.map((c) => c.body?.quote)));
   check("image_generate: prompt com e-mail e telefone vira [removido] antes de sair", real && !/@|91234/.test(JSON.stringify(real.body)) && /\[removido\]/.test(real.body.prompt) && real.key === KEY, JSON.stringify(real?.body));
   const out = JSON.parse(txt(s, 11) || "{}");
   check("image_generate: resposta só com os campos combinados (nada a mais)", JSON.stringify(Object.keys(out).sort()) === JSON.stringify(["cap_left_usd", "cost_kind", "cost_usd", "height", "id", "ok", "provider", "url", "width"]) && !/segredo|nao-deve-sair/.test(txt(s, 11)), txt(s, 11));
@@ -1090,7 +1094,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("image_generate: limite do dia vira reason + frase", res(s, 13)?.isError === true && /"reason":"limite do dia"/.test(txt(s, 13)) && /"cap_left_usd":0/.test(txt(s, 13)), txt(s, 13));
   check("image_generate: project_id que não é uuid recusado sem rede", res(s, 14)?.isError === true && !posts.some((c) => c.path.includes("..")), txt(s, 14));
   const tool = s.out.find((o) => o.msg.id === 15)?.msg.result?.tools?.find((t) => t.name === "image_generate");
-  check("image_generate: a descrição manda dry_run + ask antes de gerar", /dry_run: true/.test(tool?.description ?? "") && /`ask`/.test(tool?.description ?? "") && /só gere no Sim/.test(tool?.description ?? ""), (tool?.description ?? "").slice(0, 80));
+  check("image_generate: a descrição manda dry_run + ask + quote antes de gerar", /dry_run: true/.test(tool?.description ?? "") && /`ask`/.test(tool?.description ?? "") && /só gere no Sim/.test(tool?.description ?? "") && /quote/.test(tool?.description ?? ""), (tool?.description ?? "").slice(0, 80));
   s.p.kill();
   f.srv.close();
 }
