@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.9.2";
+var VERSION = "0.10.0";
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17313,6 +17313,7 @@ var INSTRUCTIONS = DEGRADED ? [
   "`reply`, `deliver` e as LEITURAS do `shop_query` v\xE3o pra loja da \xFAltima mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: \u2026]`, ou o `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
   "Pedido `/mcp`, 'ligar a Meta' ou ferramenta da Meta (`mcp__meta-ads__*`) que n\xE3o existe nesta sess\xE3o: responda os 3 passos (no terminal: digite `/mcp` \u2192 escolha `meta-ads` \u2192 entre com o Facebook; depois feche e abra o `ironoffice`), nunca 'n\xE3o funciona aqui'.",
   "Pedido `an\xFAncios: atualizar` (bot\xE3o do site) ou 'como est\xE3o meus an\xFAncios': carregue a skill `anuncios`; o retrato vai pro site pela ferramenta `ads_status`.",
+  "Pedido de imagem ('gera uma imagem', 'varia\xE7\xE3o da imagem <id>'): carregue a skill `imagens`; custo pelo `image_generate` com dry_run e o sim pelo `ask` antes de gerar.",
   "Pedido `trilha: <etapa>` ou `continuar a trilha`: carregue a skill `trilha`, chame `trail_status` antes de agir e `trail_update` depois de medir; nunca marque `provada` sem a prova medida.",
   "Perguntas ao aluno: UMA por mensagem, pela ferramenta `ask` com op\xE7\xF5es quando couber (at\xE9 6) e `skip`; espere a resposta antes da pr\xF3xima; nunca mande lista de perguntas.",
   "A\xE7\xE3o de pedido: o cart\xE3o j\xE1 apareceu acima da sua resposta; diga 'confirme no cart\xE3o acima' em 1 linha, sem repetir o conte\xFAdo do cart\xE3o.",
@@ -17456,6 +17457,25 @@ var TOOLS = DEGRADED ? [
       type: "object",
       properties: { project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: \u2026] ou do shop_status)." } },
       required: ["project_id"]
+    }
+  },
+  {
+    name: "image_generate",
+    description: "Gera imagem da loja pelo Iron Office (skill `imagens`): o SITE chama o provedor (OpenAI gpt-image-2 ou fal flux/dev) com a chave do aluno, que fica cifrada no servidor e nunca vem pra c\xE1; recorta pro destino e guarda na aba Imagens da loja. SEMPRE: 1) chame com dry_run: true pra saber o custo (estimate_usd) e o saldo do dia (cap_left_usd); 2) pergunte ao aluno pelo `ask` \"Vai custar \u2248 US$ X na sua conta da <provedor>. Gero?\" e s\xF3 gere no Sim. Destinos: feed 1080\xD71350 \xB7 story 1080\xD71920 \xB7 quadrado 1080\xD71080 \xB7 banner 1920\xD71080. Resposta: { ok, id, url (link de 1 h), width, height, provider, cost_usd, cost_kind (estimado|medido), cap_left_usd } ou { ok: false, reason: 'sem provedor' | 'limite do dia' | 'por minuto' | 'provedor recusou' | 'provedor fora', error }. O prompt passa por filtro (e-mail, telefone e chave viram [removido]). Leva at\xE9 2 min. S\xF3 na sess\xE3o aberta com ironoffice.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: \u2026] ou do shop_status)." },
+        prompt: { type: "string", description: "o pedido ao provedor, em ingl\xEAs, montado pela skill `imagens` (\u2264 1.000 caracteres)." },
+        request_text: { type: "string", description: "o pedido do aluno nas palavras dele (aparece na aba Imagens; \u2264 1.000)." },
+        destination: { type: "string", enum: ["feed", "story", "quadrado", "banner"] },
+        label: { type: "string", enum: ["anuncio", "produto", "pagina", "outro"] },
+        provider: { type: "string", enum: ["openai", "fal"], description: "opcional; sem ele, a OpenAI se conectada, sen\xE3o o fal." },
+        n: { type: "integer", minimum: 1, maximum: 4, description: "quantas imagens (1 a 4; padr\xE3o 1)." },
+        product_handle: { type: "string", description: "opcional: handle do produto na Shopify." },
+        dry_run: { type: "boolean", description: "true = s\xF3 o custo estimado e o saldo do dia, sem gerar." }
+      },
+      required: ["project_id", "prompt", "destination"]
     }
   },
   {
@@ -17706,6 +17726,38 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (e.status === 404) return text("Projeto n\xE3o encontrado nesta conta (confira o project_id no shop_status).", true);
       if (e.status === 400 || e.status === 413) return text(`O site recusou o retrato: ${redactKeys(String(e.message ?? ""), 300).text}`, true);
       return text(`Falhou ao gravar o retrato dos an\xFAncios: ${e.message}`, true);
+    }
+  }
+  if (name === "image_generate") {
+    if (mode !== "active") return text(`Esta sess\xE3o n\xE3o gera imagem pelo Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
+    const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
+    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+    if (!prompt) return text("Falta o prompt da imagem.", true);
+    if (prompt.length > 1e3) return text("O prompt passou de 1.000 caracteres: encurte.", true);
+    const n = args.n === void 0 || args.n === null ? 1 : args.n;
+    if (!Number.isInteger(n) || n < 1 || n > 4) return text("n: de 1 a 4 imagens por pedido.", true);
+    const body = {
+      prompt: scrubAdsText(prompt).slice(0, 1e3),
+      request_text: typeof args.request_text === "string" ? scrubAdsText(args.request_text.trim()).slice(0, 1e3) : void 0,
+      destination: args.destination,
+      label: args.label,
+      provider: args.provider,
+      n,
+      product_handle: typeof args.product_handle === "string" ? args.product_handle : void 0,
+      dry_run: args.dry_run === true
+    };
+    try {
+      const res = await api(`/api/stores/${id}/images`, { method: "POST", body, timeoutMs: 18e4 });
+      const pick2 = res.dry_run ? { ok: true, dry_run: true, provider: res.provider ?? null, destination: res.destination ?? null, n: res.n ?? n, estimate_usd: res.estimate_usd ?? null, cap_usd: res.cap_usd ?? null, cap_left_usd: res.cap_left_usd ?? null, fits: res.fits ?? null } : { ok: res.ok === true, id: res.id ?? null, url: res.url ?? null, width: res.width ?? null, height: res.height ?? null, provider: res.provider ?? null, cost_usd: res.cost_usd ?? null, cost_kind: res.cost_kind ?? null, cap_left_usd: res.cap_left_usd ?? null };
+      return text(JSON.stringify(pick2));
+    } catch (e) {
+      if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
+      if (e.status === 404) return text("Loja n\xE3o encontrada nesta conta (confira o project_id no shop_status).", true);
+      if (e.name === "AbortError") return text(JSON.stringify({ ok: false, reason: "provedor fora", error: "O provedor demorou demais; tente de novo em 1 minuto." }), true);
+      const d = e.data && typeof e.data === "object" ? e.data : {};
+      const reason = typeof d.reason === "string" ? d.reason.slice(0, 40) : e.status === 400 ? "pedido inv\xE1lido" : "erro";
+      return text(JSON.stringify({ ok: false, reason, error: redactKeys(String(e.message ?? ""), 300).text, cap_left_usd: d.cap_left_usd ?? null }), true);
     }
   }
   if (name === "store_speed") {

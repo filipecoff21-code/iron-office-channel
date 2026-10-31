@@ -1045,6 +1045,56 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   f.srv.close();
 }
 
+// ─── 16b. image_generate (0.10.0, onda 29a) ───────────────────────────────
+{
+  console.log("image_generate (0.10.0)");
+  const LOJA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === `/api/stores/${LOJA}/images` && c.method === "POST") {
+      if (c.body?.dry_run) return { json: { ok: true, dry_run: true, provider: "openai", model: "gpt-image-2", destination: "feed", n: 1, estimate_usd: 0.0386, cap_usd: 2, cap_left_usd: 2, fits: true } };
+      if (c.body?.destination === "banner") return { status: 429, json: { ok: false, reason: "limite do dia", cap_left_usd: 0, error: "O limite de hoje acabou (US$ 2)." } };
+      return { json: { ok: true, id: "img-1", url: "https://x.supabase.co/sign/u/l/img-1.jpg?token=t", width: 1080, height: 1350, provider: "openai", model: "gpt-image-2", cost_usd: 0.039, cost_kind: "medido", cap_left_usd: 1.961, images: [{}], segredo: "nao-deve-sair" } };
+    }
+  });
+  const call = (s, id, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "image_generate", arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+  const base = { project_id: LOJA, prompt: "boot in the rain, contact maria@exemplo.com or (31) 91234-5678", request_text: "a bota na chuva", destination: "feed", label: "anuncio" };
+
+  const p = startServer(casa(), f.url, {});
+  p.handshake();
+  await sleep(1500);
+  call(p, 2, base);
+  await sleep(500);
+  check("image_generate fora do canal: recusa sem chamar o site", res(p, 2)?.isError === true && !f.calls.some((c) => c.path.endsWith("/images")), txt(p, 2));
+  p.p.kill();
+
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(2500);
+  call(s, 10, { ...base, dry_run: true });
+  call(s, 11, base);
+  call(s, 12, { ...base, n: 5 });
+  call(s, 13, { ...base, destination: "banner" });
+  call(s, 14, { ...base, project_id: "../x" });
+  s.send({ jsonrpc: "2.0", id: 15, method: "tools/list" });
+  await sleep(1500);
+  const posts = f.calls.filter((c) => c.path.endsWith("/images"));
+  const real = posts.find((c) => !c.body?.dry_run && c.body?.destination === "feed");
+  check("image_generate: dry_run devolve custo e saldo", /"estimate_usd":0.0386/.test(txt(s, 10)) && /"cap_left_usd":2/.test(txt(s, 10)), txt(s, 10));
+  check("image_generate: prompt com e-mail e telefone vira [removido] antes de sair", real && !/@|91234/.test(JSON.stringify(real.body)) && /\[removido\]/.test(real.body.prompt) && real.key === KEY, JSON.stringify(real?.body));
+  const out = JSON.parse(txt(s, 11) || "{}");
+  check("image_generate: resposta só com os campos combinados (nada a mais)", JSON.stringify(Object.keys(out).sort()) === JSON.stringify(["cap_left_usd", "cost_kind", "cost_usd", "height", "id", "ok", "provider", "url", "width"]) && !/segredo|nao-deve-sair/.test(txt(s, 11)), txt(s, 11));
+  check("image_generate: n 5 recusado antes de sair", res(s, 12)?.isError === true && !posts.some((c) => c.body?.n === 5), txt(s, 12));
+  check("image_generate: limite do dia vira reason + frase", res(s, 13)?.isError === true && /"reason":"limite do dia"/.test(txt(s, 13)) && /"cap_left_usd":0/.test(txt(s, 13)), txt(s, 13));
+  check("image_generate: project_id que não é uuid recusado sem rede", res(s, 14)?.isError === true && !posts.some((c) => c.path.includes("..")), txt(s, 14));
+  const tool = s.out.find((o) => o.msg.id === 15)?.msg.result?.tools?.find((t) => t.name === "image_generate");
+  check("image_generate: a descrição manda dry_run + ask antes de gerar", /dry_run: true/.test(tool?.description ?? "") && /`ask`/.test(tool?.description ?? "") && /só gere no Sim/.test(tool?.description ?? ""), (tool?.description ?? "").slice(0, 80));
+  s.p.kill();
+  f.srv.close();
+}
+
 // ─── 17. trilha e perguntas (0.8.0, onda 27a) ─────────────────────────────
 {
   console.log("trilha e perguntas (0.8.0)");
