@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.11.0";
+var VERSION = "0.12.0";
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17188,6 +17188,27 @@ function storePrefix(store) {
 `;
 }
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var PAGE_KINDS = ["landing", "clone", "shopify", "outra"];
+function pageUrlArg(v) {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (!s || s.length > 500 || /[\s<>"']/.test(s)) return null;
+  if (redactKeys(s, 500).text !== s) return null;
+  let u;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:" || u.username || u.password || u.port !== "") return null;
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(u.hostname)) return null;
+  return u.href.length <= 500 ? u.href : null;
+}
+function localPathArg(v) {
+  const s = String(v).trim();
+  if (!s || s.length > 300 || s.startsWith("/") || s.includes("\\") || /(^|\/)\.\.(\/|$)/.test(s) || /[\u0000-\u001f\u007f]/.test(s)) return null;
+  return redactKeys(s, 300).text === s ? s : null;
+}
 var HANDLE_RE = /^[a-z0-9-]{1,255}$/;
 var VARIANT_GID_RE = /^gid:\/\/shopify\/ProductVariant\/\d{1,20}$/;
 function imageReferenceArg(r) {
@@ -17329,6 +17350,8 @@ var INSTRUCTIONS = DEGRADED ? [
   "Pedido do canal que terminou num relat\xF3rio (resultado de subagente como iron-auditor ou iron-spy, copy longa, plano): chame `deliver` com o t\xEDtulo, o agente e o conte\xFAdo completo ANTES do `reply`, e termine o `reply` com a `url` que o `deliver` devolveu. Resposta curta de conversa n\xE3o vira entrega.",
   "Auditoria ou Spy: o relat\xF3rio do agente termina com um bloco `## Cart\xE3o` (JSON). Passe esse JSON em `card` no `deliver`, sem reescrever. O `reply` final vira 1 ou 2 linhas (nota + frase) e a url; o cart\xE3o aparece sozinho no chat.",
   "Pedido `usa o iron-auditor:` traz `dono=sim|nao` (o site \xE9 do aluno ou de terceiro): repasse ao auditor como est\xE1.",
+  "Auditoria: passe a `url` auditada em `deliver` (o site mostra a nota na aba P\xE1ginas).",
+  "Quando terminar uma P\xC1GINA (lp-cinematico, iron-clone, p\xE1gina criada na Shopify fora do produto), chame `page_save` com t\xEDtulo, tipo e a URL (se j\xE1 est\xE1 no ar) ou o caminho da pasta (se \xE9 rascunho). Nunca publique a p\xE1gina sozinho: quem publica \xE9 o aluno.",
   "Loja Shopify: o agente iron-shopify usa as ferramentas `shop_status` e `shop_query` deste plugin; nunca `curl` nem a chave do Iron Office.",
   "A primeira linha `[loja: \u2026]` diz a loja ativa do aluno: o pedido \xE9 sobre ela. Se a ficha existe (caminho relativo \xE0 pasta onde esta sess\xE3o abriu, o cofre), leia-a antes de responder. Se diz `ficha: ainda sem ficha` e o pedido \xE9 sobre a loja, ofere\xE7a em 1 linha montar a ficha (skill `loja`) e espere o sim; sem o sim, responda o pedido normalmente.",
   "`reply`, `deliver` e as LEITURAS do `shop_query` v\xE3o pra loja da \xFAltima mensagem. Pra ESCREVER na loja (mutation), passe sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: \u2026]`, ou o `shop_status`): sem ele, com mais de uma loja conectada, o site recusa e pede pra escolher.",
@@ -17388,7 +17411,8 @@ var TOOLS = DEGRADED ? [
           type: "object",
           description: "Opcional: o JSON do bloco `## Cart\xE3o` que o agente devolveu, sem reescrever: { kind, score, summary, items: [{ title, why, effort, action }] }."
         },
-        project_id: { type: "string", description: "Opcional: id da loja da entrega. Sem ele, a loja da \xFAltima mensagem." }
+        project_id: { type: "string", description: "Opcional: id da loja da entrega. Sem ele, a loja da \xFAltima mensagem." },
+        url: { type: "string", description: "Opcional: a URL da p\xE1gina auditada ou entregue (https://\u2026); o site liga a entrega \xE0 p\xE1gina na aba P\xE1ginas." }
       },
       required: ["title", "agent", "content"]
     }
@@ -17527,6 +17551,21 @@ var TOOLS = DEGRADED ? [
     }
   },
   {
+    name: "page_save",
+    description: "Registra na aba P\xE1ginas do Iron Office uma p\xE1gina que o Iron fez (lp-cinematico, iron-clone, p\xE1gina criada na Shopify fora do produto). Com `url` (j\xE1 no ar) o site abre a p\xE1gina e mostra se est\xE1 no ar; s\xF3 com `local_path` (pasta no computador) ela fica como rascunho. Mesma URL de novo = atualiza, n\xE3o duplica. Nunca publique a p\xE1gina sozinho. S\xF3 na sess\xE3o aberta com ironoffice. Devolve { id, status, url_aba }.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: \u2026] ou do shop_status)." },
+        title: { type: "string", description: "Nome da p\xE1gina (at\xE9 120 caracteres)." },
+        kind: { type: "string", enum: ["landing", "clone", "shopify", "outra"], description: "landing = p\xE1gina de venda do zero; clone = no estilo de uma refer\xEAncia; shopify = p\xE1gina criada na Shopify; outra." },
+        url: { type: "string", description: "Opcional: o endere\xE7o p\xFAblico da p\xE1gina (https://\u2026), se j\xE1 est\xE1 no ar." },
+        local_path: { type: "string", description: "Opcional: o caminho RELATIVO da pasta da p\xE1gina (rascunho), ex.: paginas/lp-produto. Sem / no come\xE7o, sem .." }
+      },
+      required: ["project_id", "title", "kind"]
+    }
+  },
+  {
     name: "ads_status",
     description: 'Grava no Iron Office o retrato dos an\xFAncios do projeto (skill `anuncios`): n\xFAmeros dos \xFAltimos 7 dias, funil, campanhas, pe\xE7as e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot (v 2; tudo PLANO, sem objeto dentro de campanha ou pe\xE7a): { v: 2, at (ISO com fuso), account_id, account_name, currency, window_days: 7, spend, impressions, clicks, results, result_label, cpa, FUNIL, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED\u2026), spend, impressions, results, result_label (o resultado DESTA campanha, ex. "engajamentos"), adsets_active, adsets_total (grupos no ar / total, pelo campaign_id), FUNIL }] (\u226410), top_ads: [{ name, campaign, spend, impressions, results, video_3s, thruplay, link_clicks, lpv, purchases, product_handle? (handle da Shopify do link da pe\xE7a) }] (\u22645), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada, ad, campaign, since?, detail, action }] (\u226410), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (\u226410) }. FUNIL = reach, frequency, video_3s, thruplay, link_clicks, lpv, view_content, atc, ic, payment, purchases, revenue: n\xFAmero, ou null quando a Meta n\xE3o mandou (nunca 0 no lugar de null). At\xE9 8 kB. A resposta traz `pricing` (CPA m\xE1ximo \xD7 real, frase pronta) e `reading` (sobra | paga a conta | preju\xEDzo | sem refer\xEAncia). S\xF3 na sess\xE3o aberta com ironoffice.',
     inputSchema: {
@@ -17616,11 +17655,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
     if (!title || !content.trim()) return text("title e content s\xE3o obrigat\xF3rios.", true);
+    const pageUrl = pageUrlArg(args.url);
     try {
       const res = await api("/api/deliverables", {
         method: "POST",
         // o cartão vai como veio: quem poda nos limites é o servidor
-        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...card ? { card } : {}, ...storeArg(args) ? { project_id: storeArg(args) } : {} }
+        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...card ? { card } : {}, ...storeArg(args) ? { project_id: storeArg(args) } : {}, ...pageUrl ? { page_url: pageUrl } : {} }
       });
       const id = res?.deliverable?.id;
       if (typeof id !== "string" || !id) return text("O Iron Office n\xE3o devolveu o id da entrega.", true);
@@ -17857,6 +17897,33 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const d = e.data && typeof e.data === "object" ? e.data : {};
       const reason = typeof d.reason === "string" ? d.reason.slice(0, 40) : e.status === 404 ? "n\xE3o achou" : "erro";
       return text(JSON.stringify({ ok: false, reason, error: redactKeys(String(e.message ?? ""), 300).text }), true);
+    }
+  }
+  if (name === "page_save") {
+    if (mode !== "active") return text(`Esta sess\xE3o n\xE3o registra p\xE1ginas no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
+    const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
+    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    const title = redactKeys(String(args.title ?? "").replace(/\s+/g, " ").trim(), 120).text;
+    if (!title) return text("title: o nome da p\xE1gina.", true);
+    const kind = PAGE_KINDS.includes(args.kind) ? args.kind : null;
+    if (!kind) return text("kind: landing, clone, shopify ou outra.", true);
+    const hasUrl = typeof args.url === "string" && args.url.trim() !== "";
+    const url = hasUrl ? pageUrlArg(args.url) : null;
+    if (hasUrl && !url) return text("url inv\xE1lida: o endere\xE7o p\xFAblico completo da p\xE1gina (https://\u2026), sem senha e sem chave.", true);
+    const hasPath = typeof args.local_path === "string" && args.local_path.trim() !== "";
+    const local_path = hasPath ? localPathArg(args.local_path) : null;
+    if (hasPath && !local_path) return text("local_path inv\xE1lido: o caminho RELATIVO da pasta (sem / no come\xE7o, sem ..).", true);
+    if (!url && !local_path) return text("Mande a url (se a p\xE1gina j\xE1 est\xE1 no ar) ou o local_path (se \xE9 rascunho).", true);
+    try {
+      const res = await api(`/api/stores/${id}/pages`, { method: "POST", body: { title, kind, ...url ? { url } : {}, ...local_path ? { local_path } : {} }, timeoutMs: 2e4 });
+      const pageId = res?.page?.id;
+      if (typeof pageId !== "string" || !UUID_RE.test(pageId)) return text("O Iron Office n\xE3o devolveu o id da p\xE1gina.", true);
+      const status = ["no_ar", "rascunho", "fora_do_ar"].includes(res.page.status) ? res.page.status : "rascunho";
+      return text(JSON.stringify({ id: pageId, status, url_aba: `${BASE}/pages?store=${id}&page=${pageId}` }));
+    } catch (e) {
+      if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
+      if (e.name === "AbortError") return text("O site n\xE3o respondeu a tempo. Confira a aba P\xE1ginas antes de registrar de novo.", true);
+      return text(`O site n\xE3o registrou a p\xE1gina: ${redactKeys(String(e.message ?? ""), 300).text}`, true);
     }
   }
   if (name === "store_speed") {

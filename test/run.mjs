@@ -1249,6 +1249,85 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   f.srv.close();
 }
 
+// ─── 18. páginas (0.12.0, onda 30): deliver.url e page_save ─────────────
+{
+  console.log("páginas (0.12.0)");
+  const LOJA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", PAG = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/deliverables") return { json: { ok: true, deliverable: { id: "d-30" } } };
+    if (c.path === `/api/stores/${LOJA}/pages` && c.method === "POST") return { status: 201, json: { page: { id: PAG, status: c.body.url ? "no_ar" : "rascunho" } } };
+    if (c.path.startsWith("/api/stores/") && c.method === "POST") return { status: 404, json: { error: "Loja não encontrada." } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+  const pages = () => f.calls.filter((c) => c.path === `/api/stores/${LOJA}/pages`);
+
+  // fora do canal: não registra
+  const p = startServer(casa(), f.url, {});
+  p.handshake();
+  await sleep(1500);
+  call(p, 2, "page_save", { project_id: LOJA, title: "LP", kind: "landing", url: "https://lp.loja-exemplo.com/" });
+  await sleep(500);
+  check("page_save fora do canal: recusa sem chamar o site", res(p, 2)?.isError === true && pages().length === 0, txt(p, 2));
+  const tools = (p.out.find((o) => o.msg.id === "tl")?.msg.result?.tools ?? []);
+  const ins = p.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
+  check("instrução: auditoria passa a url no deliver; página pronta vai pelo page_save; nunca publicar sozinho", ins.includes("passe a `url` auditada em `deliver`") && ins.includes("chame `page_save`") && ins.includes("Nunca publique a página sozinho"));
+  p.send({ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} });
+  await sleep(400);
+  const list = p.out.find((o) => o.msg.id === 3)?.msg.result?.tools ?? tools;
+  const ps = list.find((t) => t.name === "page_save");
+  const dv = list.find((t) => t.name === "deliver");
+  check("tools/list: page_save (project_id, title, kind obrigatórios) e deliver com url", !!ps && ["project_id", "title", "kind"].every((k) => ps.inputSchema.required.includes(k)) && !!dv?.inputSchema.properties.url, JSON.stringify(ps?.inputSchema?.required));
+  p.p.kill();
+
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(3000);
+  // deliver com url: vai como page_url; inválida ou com chave dentro não vai (a entrega vai)
+  const chave = "iok_" + "e".repeat(48);
+  call(s, 10, "deliver", { title: "Auditoria", agent: "iron-auditor", content: "c", project_id: LOJA, url: "https://loja-exemplo.com/products/bota" });
+  call(s, 11, "deliver", { title: "Auditoria", agent: "iron-auditor", content: "c", url: "javascript:alert(1)" });
+  call(s, 12, "deliver", { title: "Auditoria", agent: "iron-auditor", content: "c", url: `https://loja-exemplo.com/?token=${chave}` });
+  call(s, 13, "deliver", { title: "Auditoria", agent: "iron-auditor", content: "c", url: "http://169.254.169.254/latest/meta-data/" });
+  await sleep(900);
+  const dl = f.calls.filter((c) => c.path === "/api/deliverables").map((c) => c.body);
+  check("deliver com url: manda page_url", dl[0]?.page_url === "https://loja-exemplo.com/products/bota" && dl[0]?.project_id === LOJA, JSON.stringify(dl[0]));
+  check("deliver: url inválida, com chave dentro ou IP literal não vai, e a entrega vai", dl.length === 4 && dl.slice(1).every((b) => !("page_url" in b)) && !JSON.stringify(dl).includes(chave), JSON.stringify(dl.slice(1)));
+
+  // page_save: validações no plugin (nada chega ao site)
+  const ruins = [
+    { title: "LP", kind: "landing", url: "https://x.com/" },                                  // sem project_id
+    { project_id: "nao-uuid", title: "LP", kind: "landing", url: "https://x.com/" },
+    { project_id: LOJA, title: "  ", kind: "landing", url: "https://x.com/" },
+    { project_id: LOJA, title: "LP", kind: "blog", url: "https://x.com/" },
+    { project_id: LOJA, title: "LP", kind: "landing" },                                       // sem url nem pasta
+    { project_id: LOJA, title: "LP", kind: "landing", url: "file:///etc/passwd" },
+    { project_id: LOJA, title: "LP", kind: "landing", url: "http://127.0.0.1:3000/" },
+    { project_id: LOJA, title: "LP", kind: "landing", local_path: "../../etc" },
+    { project_id: LOJA, title: "LP", kind: "landing", local_path: "/Users/x/lp" },
+    { project_id: LOJA, title: "LP", kind: "landing", url: `https://x.com/?k=${chave}` },
+  ];
+  ruins.forEach((a, i) => call(s, 20 + i, "page_save", a));
+  await sleep(900);
+  check("page_save: sem project_id/title, kind fora, sem url nem pasta, url ou pasta inválidas, url com chave → recusa sem chamar o site",
+    ruins.every((_, i) => res(s, 20 + i)?.isError === true) && pages().length === 0, ruins.map((_, i) => txt(s, 20 + i).slice(0, 40)).join(" | "));
+  call(s, 40, "page_save", { project_id: LOJA, title: "LP da Bota\n(versão 1)", kind: "landing", url: "https://lp.loja-exemplo.com/bota" });
+  call(s, 41, "page_save", { project_id: LOJA, title: "LP rascunho", kind: "clone", local_path: "paginas/lp-bota" });
+  await sleep(900);
+  const [b1, b2] = pages().map((c) => c.body);
+  check("page_save: corpo certo (título em 1 linha, url) e resposta { id, status, url_aba }",
+    b1?.title === "LP da Bota (versão 1)" && b1?.kind === "landing" && b1?.url === "https://lp.loja-exemplo.com/bota" && !("local_path" in b1)
+      && JSON.parse(txt(s, 40) || "{}").url_aba === `${f.url}/pages?store=${LOJA}&page=${PAG}` && JSON.parse(txt(s, 40) || "{}").status === "no_ar", JSON.stringify(b1) + " " + txt(s, 40));
+  check("page_save: rascunho só com a pasta", b2?.local_path === "paginas/lp-bota" && !("url" in b2) && JSON.parse(txt(s, 41) || "{}").status === "rascunho", JSON.stringify(b2) + " " + txt(s, 41));
+  call(s, 42, "page_save", { project_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", title: "LP", kind: "landing", local_path: "a" });
+  await sleep(600);
+  check("page_save: loja de outra conta (404) vira erro em português", res(s, 42)?.isError === true && /não registrou a página/.test(txt(s, 42)), txt(s, 42));
+  s.p.kill();
+  f.srv.close();
+}
+
 for (const d of lixo) {
   try {
     rmSync(d, { recursive: true, force: true });
