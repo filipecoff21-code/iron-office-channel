@@ -1049,12 +1049,16 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 {
   console.log("image_generate (0.10.0)");
   const LOJA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const IMG = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const IMG2 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const f = await fakeOffice((c) => {
     if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
     if (c.path === `/api/stores/${LOJA}/images` && c.method === "POST") {
       if (c.body?.dry_run) return { json: { ok: true, dry_run: true, provider: "openai", model: "gpt-image-2", destination: "feed", n: 1, estimate_usd: 0.0386, cap_usd: 2, cap_left_usd: 2, fits: true, quote: "1800000000000.QQQ", expires_at: "x" } };
+      if (c.body?.n === 2) return { json: { ok: true, id: IMG, width: 1080, height: 1080, provider: "fal", cost_usd: 0.06, cost_kind: "estimado", cap_left_usd: 1, images: [{ id: IMG, url: "https://x.supabase.co/a?token=t" }, { id: IMG2, url: "https://x.supabase.co/b?token=t" }] } };
+      if (c.body?.destination === "story") return { json: { ok: true, id: "img-nao-uuid", url: "https://x.supabase.co/c?token=t", width: 1080, height: 1920 } };
       if (c.body?.destination === "banner") return { status: 429, json: { ok: false, reason: "limite do dia", cap_left_usd: 0, error: "O limite de hoje acabou (US$ 2)." } };
-      return { json: { ok: true, id: "img-1", url: "https://x.supabase.co/sign/u/l/img-1.jpg?token=t", width: 1080, height: 1350, provider: "openai", model: "gpt-image-2", cost_usd: 0.039, cost_kind: "medido", cap_left_usd: 1.961, images: [{}], segredo: "nao-deve-sair" } };
+      return { json: { ok: true, id: IMG, url: "https://x.supabase.co/sign/u/l/img-1.jpg?token=t", width: 1080, height: 1350, provider: "openai", model: "gpt-image-2", cost_usd: 0.039, cost_kind: "medido", cap_left_usd: 1.961, images: [{}], segredo: "nao-deve-sair" } };
     }
   });
   const call = (s, id, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "image_generate", arguments: args } });
@@ -1080,6 +1084,8 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 14, { ...base, project_id: "../x" });
   call(s, 16, { ...base, dry_run: "true" });
   call(s, 17, { ...base, quote: "1800000000000.QQQ" });
+  call(s, 18, { ...base, n: 2 });
+  call(s, 19, { ...base, destination: "story" });
   s.send({ jsonrpc: "2.0", id: 15, method: "tools/list" });
   await sleep(1500);
   const posts = f.calls.filter((c) => c.path.endsWith("/images"));
@@ -1090,6 +1096,10 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("image_generate: prompt com e-mail e telefone vira [removido] antes de sair", real && !/@|91234/.test(JSON.stringify(real.body)) && /\[removido\]/.test(real.body.prompt) && real.key === KEY, JSON.stringify(real?.body));
   const out = JSON.parse(txt(s, 11) || "{}");
   check("image_generate: resposta só com os campos combinados (nada a mais)", JSON.stringify(Object.keys(out).sort()) === JSON.stringify(["cap_left_usd", "cost_kind", "cost_usd", "height", "id", "ok", "provider", "url", "width"]) && !/segredo|nao-deve-sair/.test(txt(s, 11)), txt(s, 11));
+  check("image_generate (0.10.1): o link é o da aba Imagens, sem token do bucket", out.url === `${f.url}/images?image=${IMG}` && !/token|supabase/.test(txt(s, 11)), txt(s, 11));
+  const two = JSON.parse(txt(s, 18) || "{}");
+  check("image_generate (0.10.1): com n=2, cada imagem leva o link da aba dela", two.images?.[0]?.url === `${f.url}/images?image=${IMG}` && two.images?.[1]?.url === `${f.url}/images?image=${IMG2}` && !/token|supabase/.test(txt(s, 18)), txt(s, 18));
+  check("image_generate (0.10.1): id fora do formato não vira link (url null, nunca o do bucket)", JSON.parse(txt(s, 19) || "{}").url === null && !/supabase/.test(txt(s, 19)), txt(s, 19));
   check("image_generate: n 5 recusado antes de sair", res(s, 12)?.isError === true && !posts.some((c) => c.body?.n === 5), txt(s, 12));
   check("image_generate: limite do dia vira reason + frase", res(s, 13)?.isError === true && /"reason":"limite do dia"/.test(txt(s, 13)) && /"cap_left_usd":0/.test(txt(s, 13)), txt(s, 13));
   check("image_generate: project_id que não é uuid recusado sem rede", res(s, 14)?.isError === true && !posts.some((c) => c.path.includes("..")), txt(s, 14));

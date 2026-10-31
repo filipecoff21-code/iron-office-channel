@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.10.0";
+const VERSION = "0.10.1";
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -532,7 +532,7 @@ const TOOLS = DEGRADED
       {
         name: "image_generate",
         description:
-          "Gera imagem da loja pelo Iron Office (skill `imagens`): o SITE chama o provedor (OpenAI gpt-image-2 ou fal flux/dev) com a chave do aluno, que fica cifrada no servidor e nunca vem pra cá; recorta pro destino e guarda na aba Imagens da loja. SEMPRE: 1) chame com dry_run: true pra saber o custo (estimate_usd), o saldo do dia (cap_left_usd) e receber o `quote` (orçamento, vale 15 min); 2) pergunte ao aluno pelo `ask` \"Vai custar ≈ US$ X na sua conta da <provedor>. Gero?\" e só gere no Sim, mandando o MESMO pedido com o `quote` (sem ele, ou com outro pedido, o site não gera: reason 'sem orçamento'). Destinos: feed 1080×1350 · story 1080×1920 · quadrado 1080×1080 · banner 1920×1080. Resposta: { ok, id, url (link de 1 h), width, height, provider, cost_usd, cost_kind (estimado|medido), cap_left_usd, images (com n > 1), partial? } ou { ok: false, reason: 'sem provedor' | 'sem orçamento' | 'limite do dia' | 'por minuto' | 'provedor recusou' | 'provedor fora' | 'sem resposta' | 'gravar', error }. 'provedor fora', 'sem resposta' e 'gravar' podem ter cobrado: mande o aluno conferir a aba Imagens antes de pedir de novo. O prompt passa por filtro (e-mail, telefone e chave viram [removido]). Leva até 2 min. Só na sessão aberta com ironoffice.",
+          "Gera imagem da loja pelo Iron Office (skill `imagens`): o SITE chama o provedor (OpenAI gpt-image-2 ou fal flux/dev) com a chave do aluno, que fica cifrada no servidor e nunca vem pra cá; recorta pro destino e guarda na aba Imagens da loja. SEMPRE: 1) chame com dry_run: true pra saber o custo (estimate_usd), o saldo do dia (cap_left_usd) e receber o `quote` (orçamento, vale 15 min); 2) pergunte ao aluno pelo `ask` \"Vai custar ≈ US$ X na sua conta da <provedor>. Gero?\" e só gere no Sim, mandando o MESMO pedido com o `quote` (sem ele, ou com outro pedido, o site não gera: reason 'sem orçamento'). Destinos: feed 1080×1350 · story 1080×1920 · quadrado 1080×1080 · banner 1920×1080. Resposta: { ok, id, url (link da imagem na aba Imagens do site; mande esse, nunca outro), width, height, provider, cost_usd, cost_kind (estimado|medido), cap_left_usd, images (com n > 1), partial? } ou { ok: false, reason: 'sem provedor' | 'sem orçamento' | 'limite do dia' | 'por minuto' | 'provedor recusou' | 'provedor fora' | 'sem resposta' | 'gravar', error }. 'provedor fora', 'sem resposta' e 'gravar' podem ter cobrado: mande o aluno conferir a aba Imagens antes de pedir de novo. O prompt passa por filtro (e-mail, telefone e chave viram [removido]). Leva até 2 min. Só na sessão aberta com ironoffice.",
         inputSchema: {
           type: "object",
           properties: {
@@ -840,10 +840,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
     try {
       const res = await api(`/api/stores/${id}/images`, { method: "POST", body, timeoutMs: 180_000 });
-      const imgs = Array.isArray(res.images) ? res.images.slice(0, 4).map((i) => ({ id: i?.id ?? null, url: i?.url ?? null })) : [];
+      // 0.10.1: o link é o da aba Imagens (sem token). O assinado do bucket saía com o token redigido no reply.
+      const page = (imgId) => (typeof imgId === "string" && UUID_RE.test(imgId) ? `${BASE}/images?image=${imgId}` : null);
+      const imgs = Array.isArray(res.images) ? res.images.slice(0, 4).map((i) => ({ id: i?.id ?? null, url: page(i?.id) })) : [];
       const pick = res.dry_run
         ? { ok: true, dry_run: true, provider: res.provider ?? null, destination: res.destination ?? null, n: res.n ?? n, estimate_usd: res.estimate_usd ?? null, cap_usd: res.cap_usd ?? null, cap_left_usd: res.cap_left_usd ?? null, fits: res.fits ?? null, quote: typeof res.quote === "string" ? res.quote : null }
-        : { ok: res.ok === true, id: res.id ?? null, url: res.url ?? null, width: res.width ?? null, height: res.height ?? null, provider: res.provider ?? null, cost_usd: res.cost_usd ?? null, cost_kind: res.cost_kind ?? null, cap_left_usd: res.cap_left_usd ?? null,
+        : { ok: res.ok === true, id: res.id ?? null, url: page(res.id), width: res.width ?? null, height: res.height ?? null, provider: res.provider ?? null, cost_usd: res.cost_usd ?? null, cost_kind: res.cost_kind ?? null, cap_left_usd: res.cap_left_usd ?? null,
           ...(imgs.length > 1 ? { images: imgs } : {}), ...(res.partial ? { partial: true, generated: res.generated ?? null, saved: res.saved ?? null } : {}) };
       return text(JSON.stringify(pick));
     } catch (e) {

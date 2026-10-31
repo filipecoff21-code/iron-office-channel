@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.10.0";
+var VERSION = "0.10.1";
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17461,7 +17461,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "image_generate",
-    description: "Gera imagem da loja pelo Iron Office (skill `imagens`): o SITE chama o provedor (OpenAI gpt-image-2 ou fal flux/dev) com a chave do aluno, que fica cifrada no servidor e nunca vem pra c\xE1; recorta pro destino e guarda na aba Imagens da loja. SEMPRE: 1) chame com dry_run: true pra saber o custo (estimate_usd), o saldo do dia (cap_left_usd) e receber o `quote` (or\xE7amento, vale 15 min); 2) pergunte ao aluno pelo `ask` \"Vai custar \u2248 US$ X na sua conta da <provedor>. Gero?\" e s\xF3 gere no Sim, mandando o MESMO pedido com o `quote` (sem ele, ou com outro pedido, o site n\xE3o gera: reason 'sem or\xE7amento'). Destinos: feed 1080\xD71350 \xB7 story 1080\xD71920 \xB7 quadrado 1080\xD71080 \xB7 banner 1920\xD71080. Resposta: { ok, id, url (link de 1 h), width, height, provider, cost_usd, cost_kind (estimado|medido), cap_left_usd, images (com n > 1), partial? } ou { ok: false, reason: 'sem provedor' | 'sem or\xE7amento' | 'limite do dia' | 'por minuto' | 'provedor recusou' | 'provedor fora' | 'sem resposta' | 'gravar', error }. 'provedor fora', 'sem resposta' e 'gravar' podem ter cobrado: mande o aluno conferir a aba Imagens antes de pedir de novo. O prompt passa por filtro (e-mail, telefone e chave viram [removido]). Leva at\xE9 2 min. S\xF3 na sess\xE3o aberta com ironoffice.",
+    description: "Gera imagem da loja pelo Iron Office (skill `imagens`): o SITE chama o provedor (OpenAI gpt-image-2 ou fal flux/dev) com a chave do aluno, que fica cifrada no servidor e nunca vem pra c\xE1; recorta pro destino e guarda na aba Imagens da loja. SEMPRE: 1) chame com dry_run: true pra saber o custo (estimate_usd), o saldo do dia (cap_left_usd) e receber o `quote` (or\xE7amento, vale 15 min); 2) pergunte ao aluno pelo `ask` \"Vai custar \u2248 US$ X na sua conta da <provedor>. Gero?\" e s\xF3 gere no Sim, mandando o MESMO pedido com o `quote` (sem ele, ou com outro pedido, o site n\xE3o gera: reason 'sem or\xE7amento'). Destinos: feed 1080\xD71350 \xB7 story 1080\xD71920 \xB7 quadrado 1080\xD71080 \xB7 banner 1920\xD71080. Resposta: { ok, id, url (link da imagem na aba Imagens do site; mande esse, nunca outro), width, height, provider, cost_usd, cost_kind (estimado|medido), cap_left_usd, images (com n > 1), partial? } ou { ok: false, reason: 'sem provedor' | 'sem or\xE7amento' | 'limite do dia' | 'por minuto' | 'provedor recusou' | 'provedor fora' | 'sem resposta' | 'gravar', error }. 'provedor fora', 'sem resposta' e 'gravar' podem ter cobrado: mande o aluno conferir a aba Imagens antes de pedir de novo. O prompt passa por filtro (e-mail, telefone e chave viram [removido]). Leva at\xE9 2 min. S\xF3 na sess\xE3o aberta com ironoffice.",
     inputSchema: {
       type: "object",
       properties: {
@@ -17752,11 +17752,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
     try {
       const res = await api(`/api/stores/${id}/images`, { method: "POST", body, timeoutMs: 18e4 });
-      const imgs = Array.isArray(res.images) ? res.images.slice(0, 4).map((i) => ({ id: i?.id ?? null, url: i?.url ?? null })) : [];
+      const page = (imgId) => typeof imgId === "string" && UUID_RE.test(imgId) ? `${BASE}/images?image=${imgId}` : null;
+      const imgs = Array.isArray(res.images) ? res.images.slice(0, 4).map((i) => ({ id: i?.id ?? null, url: page(i?.id) })) : [];
       const pick2 = res.dry_run ? { ok: true, dry_run: true, provider: res.provider ?? null, destination: res.destination ?? null, n: res.n ?? n, estimate_usd: res.estimate_usd ?? null, cap_usd: res.cap_usd ?? null, cap_left_usd: res.cap_left_usd ?? null, fits: res.fits ?? null, quote: typeof res.quote === "string" ? res.quote : null } : {
         ok: res.ok === true,
         id: res.id ?? null,
-        url: res.url ?? null,
+        url: page(res.id),
         width: res.width ?? null,
         height: res.height ?? null,
         provider: res.provider ?? null,
