@@ -1172,6 +1172,10 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("ask/trail_status/trail_update fora do canal: recusam sem chamar o site", err(p, 2) && err(p, 3) && err(p, 4) && !f.calls.some((c) => c.path.includes("/trail") || c.path === "/api/chat/messages"), [2, 3, 4].map((i) => txt(p, i)).join(" | "));
   const ins = p.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
   check("instrução: trilha pela skill, trail_status antes, nunca provada sem prova", /`trilha: <etapa>`/.test(ins) && /trail_status` antes de agir/.test(ins) && /nunca marque `provada` sem a prova medida/.test(ins));
+  check("instrução 0.13.0: dados que faltam = formulário no chat, nunca 'veja na entrega'", /mande UM formulário pela `ask` com `fields`/.test(ins) && /Nunca escreva 'faltam N dados, veja na entrega'/.test(ins) && /2º formulário só depois do 1º voltar/.test(ins));
+  check("instrução 0.13.0: página na lógica de referência pergunta 'reaproveitar frases?' ANTES do iron-clone e voz só sem ficha", /ANTES de chamar o iron-clone/.test(ins) && /Quer que eu reaproveite frases da página de referência\?/.test(ins) && /só se a ficha da loja não tem a seção `## Voz`/.test(ins) && /só com o rótulo, não basta/.test(ins) && /`reply` com 3 linhas/.test(ins) && /entregue a v2/.test(ins));
+  check("instrução 0.13.0: a v2 sai só depois do ÚLTIMO formulário, pela skill, com anti-cópia e escrita de novo", /Quando o ÚLTIMO formulário voltar: carregue a skill `clone-persuasion`, reescreva SÓ a seção 6/.test(ins) && /rode de novo a anti-cópia e o `escrita.py`/.test(ins) && /NÃO chame `page_save` de novo/.test(ins));
+  check("instrução 0.13.0: ask recusou fields = 'feche e abra o ironoffice' + uma por vez, nunca lista no relatório", /Se a `ask` recusar `fields`/.test(ins) && /feche e abra o ironoffice/.test(ins) && /nunca vire lista no relatório/.test(ins));
   check("instrução: UMA pergunta por mensagem pela `ask`; cartão acima em 1 linha", /UMA por mensagem, pela ferramenta `ask`/.test(ins) && /nunca mande lista de perguntas/.test(ins) && /confirme no cartão acima/.test(ins) && /confirmação do aluno no site/.test(ins));
   p.p.kill();
 
@@ -1201,6 +1205,29 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("ask: só free (sem opções) passa", !err(s, 15) && asks.some((b) => b.meta?.question?.free === true && b.meta.question.options.length === 0));
   check("ask: segredo na pergunta não sai", asks.every((b) => !JSON.stringify(b).includes("e".repeat(48))));
   check("ask: só as 3 válidas chegam ao site", asks.length === 3, String(asks.length));
+
+  // 0.13.0 (31b rev1): formulário (ask com fields)
+  const before = f.calls.filter((c) => c.path === "/api/chat/messages").length;
+  call(s, 40, "ask", { chat_id: "c1", question: "Faltam 3 dados", fields: [{ id: "preco", label: " Preço  de venda ", kind: "money" }, { id: "garantia", label: "Tem garantia?", kind: "yesno" }, { id: "frete", label: "Frete", placeholder: "p".repeat(80) }], project_id: LOJA });
+  call(s, 41, "ask", { chat_id: "c1", question: "x", options: ["a"], fields: [{ id: "a", label: "A" }] });
+  call(s, 42, "ask", { chat_id: "c1", question: "x", fields: Array.from({ length: 13 }, (_, i) => ({ id: `c${i}`, label: `C ${i}` })) });
+  call(s, 43, "ask", { chat_id: "c1", question: "x", fields: [{ id: "A-b", label: "A" }] });
+  call(s, 44, "ask", { chat_id: "c1", question: "x", fields: [{ id: "a", label: "A" }, { id: "a", label: "B" }] });
+  call(s, 45, "ask", { chat_id: "c1", question: "x", fields: [{ id: "a", label: "A", kind: "data" }] });
+  call(s, 46, "ask", { chat_id: "c1", question: "x", fields: [{ id: "a", label: "l".repeat(81) }] });
+  call(s, 47, "ask", { chat_id: "c1", question: "x", fields: [] });
+  call(s, 48, "ask", { chat_id: "c1", question: "x", fields: [{ id: "chave", label: "Chave iok_" + "k".repeat(48) }] });
+  call(s, 49, "ask", { chat_id: "c1", question: "Emoji", fields: [{ id: "a", label: "A", placeholder: "p".repeat(59) + "😀😀" }] });
+  await sleep(1000);
+  const forms = f.calls.filter((c) => c.path === "/api/chat/messages").slice(before).map((c) => c.body);
+  const fq = forms[0]?.meta?.question ?? {};
+  check("ask fields: manda meta.question { text, fields [{id,label,placeholder,kind}] } sem options, com project_id", !err(s, 40) && fq.text === "Faltam 3 dados" && fq.options === undefined && fq.fields?.length === 3 && fq.fields[0].label === "Preço de venda" && fq.fields[0].kind === "money" && fq.fields[2].kind === "text" && fq.fields[2].placeholder.length === 60 && forms[0]?.meta?.project_id === LOJA, JSON.stringify(forms[0]));
+  check("ask fields: fields+options, 13 campos, id inválido/repetido, kind fora, rótulo > 80, vazio → recusados em português", [41, 42, 43, 44, 45, 46, 47].every((i) => err(s, i)) && /não vão juntos/.test(txt(s, 41)) && /Campos demais \(13; máximo 12\)/.test(txt(s, 42)), [41, 42, 43, 44, 45, 46, 47].map((i) => txt(s, i)).join(" | "));
+  check("ask fields: segredo no rótulo não sai", forms.every((b) => !JSON.stringify(b).includes("k".repeat(48))));
+  check("ask fields: só os 3 válidos chegam ao site", forms.length === 3, String(forms.length));
+  const ph = forms[2]?.meta?.question?.fields?.[0]?.placeholder ?? "";
+  check("ask fields: exemplo cortado em 60 CARACTERES, sem partir o emoji", Array.from(ph).length === 60 && ph.endsWith("😀") && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(ph), JSON.stringify(ph));
+  check("ask fields: o retorno diz que a resposta volta em 'rótulo: valor'", /rótulo: valor/.test(txt(s, 40)), txt(s, 40));
 
   // trail_status / trail_update
   call(s, 20, "trail_status", { project_id: LOJA });
