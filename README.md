@@ -90,6 +90,8 @@ Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair
 
 **Nota do gate na página (0.14.0):** quando o Iron entrega o gate de uma página rascunho, o `deliver` leva junto o `page_id`: o id que o próprio site devolveu no `page_save` (um uuid do Iron Office, nada da sua máquina nem pessoal). Serve só pra nota aparecer na linha certa da aba Páginas. Id fora do padrão não sai.
 
+**Resposta é botão, rodada tem fim (0.14.2):** pergunta de sim/não ao aluno é `ask` com botões ('Sim, …' e 'Depois'), nunca prosa pedindo pra digitar uma palavra. Em toda página nova da trilha de persuasão o Iron pergunta se pode reaproveitar frases da referência, e o aluno pode pular. Quando o último formulário volta, a trilha fecha com a v2 pelo `deliver` e, logo depois, a `ask` do gate. Mensagens que chegam juntas (um 'Pular' seguido de pedido novo) têm cada uma a sua resposta. O retorno do `reply` traz um aviso pro Iron quando o texto pede resposta em prosa, quando há mensagem sem resposta na conversa (um trecho de até 80 caracteres, com chave apagada) ou quando o formulário voltou sem a v2; o aviso nunca segura a mensagem. Esse aviso e o trecho ficam só na sessão do seu computador (vão pro Iron, não pro site) e somem em 30 minutos ou quando o Iron fecha. O plugin é publicado por tag no GitHub (sem npm): atualizar é o que o `ironoffice` faz ao abrir.
+
 Política completa, em português de gente: ironoffice.app/termos.
 
 **Pra desligar:** `claude plugin disable iron-office@iron-office-channel` (ou `uninstall`). Apagar `~/.claude/iron-office-api-key` também corta todo envio.
