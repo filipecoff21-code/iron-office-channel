@@ -1176,6 +1176,9 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("instrução 0.13.0: página na lógica de referência pergunta 'reaproveitar frases?' ANTES do iron-clone e voz só sem ficha", /ANTES de chamar o iron-clone/.test(ins) && /Quer que eu reaproveite frases da página de referência\?/.test(ins) && /só se a ficha da loja não tem a seção `## Voz`/.test(ins) && /só com o rótulo, não basta/.test(ins) && /`reply` com 3 linhas/.test(ins) && /entregue a v2/.test(ins));
   check("instrução 0.13.0: a v2 sai só depois do ÚLTIMO formulário, pela skill, com anti-cópia e escrita de novo", /Quando o ÚLTIMO formulário voltar: carregue a skill `clone-persuasion`, reescreva SÓ a seção 6/.test(ins) && /rode de novo a anti-cópia e o `escrita.py`/.test(ins) && /NÃO chame `page_save` de novo/.test(ins));
   check("instrução 0.13.0: ask recusou fields = 'feche e abra o ironoffice' + uma por vez, nunca lista no relatório", /Se a `ask` recusar `fields`/.test(ins) && /feche e abra o ironoffice/.test(ins) && /nunca vire lista no relatório/.test(ins));
+  check("instrução 0.14.0: caminhos oferecidos = `ask` com uma opção por caminho, nunca palavra-chave", /Oferecer CAMINHOS ao aluno/.test(ins) && /nunca prosa que pede pra ele digitar/i.test(ins) && /o aluno clica, não digita comando/.test(ins));
+  check("instrução 0.14.0: página pronta → gate por botão, deliver com url ou page_id, 'Depois' não repete", /Quer que eu rode o gate nessa página\?/.test(ins) && /'Sim, roda o gate' e 'Depois'/.test(ins) && /senão `page_id`/.test(ins) && /não ofereça de novo pra mesma página nesta conversa/.test(ins) && /na trilha de persuasão só depois da v2/.test(ins) && /nunca 'digite gate'/.test(ins));
+  check("instrução 0.14.0: dentro do Office o iron-clone e o lp-cinematico não rodam o gate sozinhos", /Dentro do Office o iron-clone e o lp-cinematico NÃO rodam o gate por conta própria/.test(ins));
   check("instrução: UMA pergunta por mensagem pela `ask`; cartão acima em 1 linha", /UMA por mensagem, pela ferramenta `ask`/.test(ins) && /nunca mande lista de perguntas/.test(ins) && /confirme no cartão acima/.test(ins) && /confirmação do aluno no site/.test(ins));
   p.p.kill();
 
@@ -1306,7 +1309,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const list = p.out.find((o) => o.msg.id === 3)?.msg.result?.tools ?? tools;
   const ps = list.find((t) => t.name === "page_save");
   const dv = list.find((t) => t.name === "deliver");
-  check("tools/list: page_save (project_id, title, kind obrigatórios) e deliver com url", !!ps && ["project_id", "title", "kind"].every((k) => ps.inputSchema.required.includes(k)) && !!dv?.inputSchema.properties.url, JSON.stringify(ps?.inputSchema?.required));
+  check("tools/list: page_save (project_id, title, kind obrigatórios) e deliver com url e page_id", !!ps && ["project_id", "title", "kind"].every((k) => ps.inputSchema.required.includes(k)) && !!dv?.inputSchema.properties.url && !!dv?.inputSchema.properties.page_id && /page_id` do `deliver` do gate/.test(ps.description), JSON.stringify(ps?.inputSchema?.required));
   p.p.kill();
 
   const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
@@ -1322,6 +1325,15 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const dl = f.calls.filter((c) => c.path === "/api/deliverables").map((c) => c.body);
   check("deliver com url: manda page_url", dl[0]?.page_url === "https://loja-exemplo.com/products/bota" && dl[0]?.project_id === LOJA, JSON.stringify(dl[0]));
   check("deliver: url inválida, com chave dentro ou IP literal não vai, e a entrega vai", dl.length === 4 && dl.slice(1).every((b) => !("page_url" in b)) && !JSON.stringify(dl).includes(chave), JSON.stringify(dl.slice(1)));
+
+  // 0.14.0 (onda 31b rev2): page_id do page_save vai no corpo; torto não vai e a entrega sai
+  const PG = "bbbbbbbb-2222-4333-8444-555555555555";
+  call(s, 14, "deliver", { title: "Gate: LP", agent: "gate", type: "gate", content: "c", project_id: LOJA, page_id: PG.toUpperCase(), card: { kind: "auditoria", score: 8 } });
+  call(s, 15, "deliver", { title: "Gate: LP", agent: "gate", content: "c", page_id: "../nao-e-id" });
+  await sleep(700);
+  const dl2 = f.calls.filter((c) => c.path === "/api/deliverables").map((c) => c.body);
+  check("deliver com page_id válido: vai no corpo (minúsculo)", dl2[4]?.page_id === PG && dl2[4]?.agent_name === "gate" && dl2[4]?.card?.score === 8, JSON.stringify(dl2[4]));
+  check("deliver com page_id torto: não vai, a entrega sai e o retorno avisa", dl2.length === 6 && !("page_id" in dl2[5]) && res(s, 15)?.isError !== true && /page_id ignorado/.test(txt(s, 15)), JSON.stringify(dl2[5]) + " | " + txt(s, 15));
 
   // page_save: validações no plugin (nada chega ao site)
   const ruins = [

@@ -17031,7 +17031,8 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.13.0";
+var VERSION = "0.14.0";
+var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
 var LOCK_DIR = join2(homedir2(), ".iron");
@@ -17365,6 +17366,8 @@ var INSTRUCTIONS = DEGRADED ? [
   "Pedido de imagem ('gera uma imagem', 'varia\xE7\xE3o da imagem <id>', 'sobe essa na Shopify', 'tira essa da Shopify'): carregue a skill `imagens`; custo pelo `image_generate` com dry_run e o sim pelo `ask` antes de gerar; subir na Shopify s\xF3 pelo `image_to_shopify` depois do sim no `ask`.",
   "Pedido `trilha: <etapa>` ou `continuar a trilha`: carregue a skill `trilha`, chame `trail_status` antes de agir e `trail_update` depois de medir; nunca marque `provada` sem a prova medida.",
   "Perguntas ao aluno: UMA por mensagem, pela ferramenta `ask` com op\xE7\xF5es quando couber (at\xE9 6) e `skip`; espere a resposta antes da pr\xF3xima; nunca mande lista de perguntas.",
+  "Oferecer CAMINHOS ao aluno ('preencher as lacunas agora ou montar com o que tem', 'duplicar o tema ou editar a c\xF3pia que j\xE1 existe', 'A ou B') \xE9 sempre `ask` com uma op\xE7\xE3o por caminho (at\xE9 6) e `skip`. Nunca prosa que pede pra ele digitar uma palavra-chave ('me diga X ou Y', 'responda montar'): o aluno clica, n\xE3o digita comando.",
+  "P\xC1GINA PRONTA (depois do `page_save` do lp-cinematico/iron-clone; na trilha de persuas\xE3o s\xF3 depois da v2; p\xE1gina da Shopify depois do sim do aluno): pergunte pela `ask` 'Quer que eu rode o gate nessa p\xE1gina?' com as op\xE7\xF5es 'Sim, roda o gate' e 'Depois'. No Sim: carregue a skill `gate` (se\xE7\xE3o 'No Iron Office'), rode, e entregue pelo `deliver` com `agent` 'gate', `type` 'gate', o JSON do `## Cart\xE3o` em `card` e a p\xE1gina: `url` se ela est\xE1 no ar, sen\xE3o `page_id` (o id que o `page_save` devolveu). O `reply` final: 3 linhas (nota, o maior achado, o pr\xF3ximo passo) e a url do parecer POR \xDALTIMO. No 'Depois': 1 linha ('Combinado. A p\xE1gina fica na aba P\xE1ginas; pe\xE7a o gate quando quiser.') e n\xE3o ofere\xE7a de novo pra mesma p\xE1gina nesta conversa. Nunca em prosa, nunca 'digite gate'. Dentro do Office o iron-clone e o lp-cinematico N\xC3O rodam o gate por conta pr\xF3pria: quem decide \xE9 o aluno pelo bot\xE3o.",
   "Faltam DADOS que o aluno sabe (pre\xE7o, garantia, frete, prazo, quantidade, nome): mande UM formul\xE1rio pela `ask` com `fields` (at\xE9 12 campos; `kind` text, number, money ou yesno; sem `options`). Mais de 12: o 2\xBA formul\xE1rio s\xF3 depois do 1\xBA voltar. A resposta chega como UMA mensagem do aluno com 'r\xF3tulo: valor' por linha ('(pulado)' = ele pulou). Nunca escreva 'faltam N dados, veja na entrega' nem mande a lista pra um relat\xF3rio: as perguntas ficam no chat.",
   "Pedido de p\xE1gina de vendas na l\xF3gica de uma refer\xEAncia ('quero vender como esta p\xE1gina', 'no estilo de\u2026', 'copia a l\xF3gica dessa p\xE1gina'): ANTES de chamar o iron-clone, pergunte pela `ask`, uma por vez: (1) 'Quer que eu reaproveite frases da p\xE1gina de refer\xEAncia?' com as op\xE7\xF5es 'N\xE3o, escreva do zero (recomendado)' e 'Sim, pode reaproveitar trechos'; (2) s\xF3 se a ficha da loja n\xE3o tem a se\xE7\xE3o `## Voz` (o campo 'Tom de voz' sozinho, s\xF3 com o r\xF3tulo, n\xE3o basta): 'Me manda um texto seu que vendeu' (free + skip), 'Como voc\xEA fala com o seu cliente?' (Formal \xB7 Pr\xF3ximo \xB7 Divertido \xB7 Direto e agressivo) e 'Tem alguma palavra que voc\xEA N\xC3O quer na sua p\xE1gina?' (free + skip). Passe as respostas no pedido ao iron-clone (ele grava em `## 0. Escolhas`); dado da oferta que falta (pre\xE7o, provas) n\xE3o trava: vira campo do formul\xE1rio do fim. No fim, nesta ordem: (1) `reply` com 3 linhas: o que fez e o risco maior; (2) o formul\xE1rio (`ask` com `fields`) com os dados que faltam e que o aluno sabe, e numa linha cada o que depende de terceiro ('pra conseguir com <quem>'); (3) `reply` de 1 linha com a url da entrega (n\xE3o \xE9 pergunta: vai logo depois do formul\xE1rio). Quando o \xDALTIMO formul\xE1rio voltar: carregue a skill `clone-persuasion`, reescreva S\xD3 a se\xE7\xE3o 6 (montador) com as respostas, sem refazer o estudo, rode de novo a anti-c\xF3pia e o `escrita.py` dela, e entregue a v2 pelo `deliver` (N\xC3O chame `page_save` de novo: o rascunho em P\xE1ginas aponta pra mesma pasta, que agora tem a v2). Se a `ask` recusar `fields` (site ou plugin antigo), diga em 1 linha 'Pra responder num formul\xE1rio, feche e abra o ironoffice' e pergunte os dados um por vez (`ask` com free e skip); nunca vire lista no relat\xF3rio.",
   "A\xE7\xE3o de pedido: o cart\xE3o j\xE1 apareceu acima da sua resposta; diga 'confirme no cart\xE3o acima' em 1 linha, sem repetir o conte\xFAdo do cart\xE3o.",
@@ -17419,7 +17422,8 @@ var TOOLS = DEGRADED ? [
           description: "Opcional: o JSON do bloco `## Cart\xE3o` que o agente devolveu, sem reescrever: { kind, score, summary, items: [{ title, why, effort, action }] }."
         },
         project_id: { type: "string", description: "Opcional: id da loja da entrega. Sem ele, a loja da \xFAltima mensagem." },
-        url: { type: "string", description: "Opcional: a URL da p\xE1gina auditada ou entregue (https://\u2026); o site liga a entrega \xE0 p\xE1gina na aba P\xE1ginas." }
+        url: { type: "string", description: "Opcional: a URL da p\xE1gina auditada ou entregue (https://\u2026); o site liga a entrega \xE0 p\xE1gina na aba P\xE1ginas." },
+        page_id: { type: "string", description: "Opcional: id da p\xE1gina rascunho que o `page_save` devolveu; o site liga a nota \xE0 linha dela em P\xE1ginas. Com `url`, n\xE3o precisa." }
       },
       required: ["title", "agent", "content"]
     }
@@ -17564,7 +17568,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "page_save",
-    description: "Registra na aba P\xE1ginas do Iron Office uma p\xE1gina que o Iron fez (lp-cinematico, iron-clone, p\xE1gina criada na Shopify fora do produto). Com `url` (j\xE1 no ar) o site abre a p\xE1gina e mostra se est\xE1 no ar; s\xF3 com `local_path` (pasta no computador) ela fica como rascunho. Mesma URL de novo = atualiza, n\xE3o duplica. Nunca publique a p\xE1gina sozinho. S\xF3 na sess\xE3o aberta com ironoffice. Devolve { id, status, url_aba }.",
+    description: "Registra na aba P\xE1ginas do Iron Office uma p\xE1gina que o Iron fez (lp-cinematico, iron-clone, p\xE1gina criada na Shopify fora do produto). Com `url` (j\xE1 no ar) o site abre a p\xE1gina e mostra se est\xE1 no ar; s\xF3 com `local_path` (pasta no computador) ela fica como rascunho. Mesma URL de novo = atualiza, n\xE3o duplica. Nunca publique a p\xE1gina sozinho. S\xF3 na sess\xE3o aberta com ironoffice. Devolve { id, status, url_aba }. Guarde o `id` devolvido: \xE9 o `page_id` do `deliver` do gate.",
     inputSchema: {
       type: "object",
       properties: {
@@ -17668,16 +17672,19 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     if (!title || !content.trim()) return text("title e content s\xE3o obrigat\xF3rios.", true);
     const pageUrl = pageUrlArg(args.url);
+    const rawPageId = typeof args.page_id === "string" ? args.page_id.trim().toLowerCase() : "";
+    const pageId = PAGE_ID_RE.test(rawPageId) ? rawPageId : "";
+    const pageIdNote = rawPageId && !pageId ? " page_id ignorado: n\xE3o \xE9 o id que o page_save devolveu." : "";
     try {
       const res = await api("/api/deliverables", {
         method: "POST",
         // o cartão vai como veio: quem poda nos limites é o servidor
-        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...card ? { card } : {}, ...storeArg(args) ? { project_id: storeArg(args) } : {}, ...pageUrl ? { page_url: pageUrl } : {} }
+        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...card ? { card } : {}, ...storeArg(args) ? { project_id: storeArg(args) } : {}, ...pageUrl ? { page_url: pageUrl } : {}, ...pageId ? { page_id: pageId } : {} }
       });
       const id = res?.deliverable?.id;
       if (typeof id !== "string" || !id) return text("O Iron Office n\xE3o devolveu o id da entrega.", true);
       const url = `${BASE}/deliverables?id=${encodeURIComponent(id)}`;
-      return text(JSON.stringify({ id, url }));
+      return text(JSON.stringify({ id, url }) + pageIdNote);
     } catch (e) {
       return text(`Falhou ao salvar a entrega: ${e.message}`, true);
     }

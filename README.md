@@ -88,6 +88,8 @@ Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair
 
 **Mensagem do site é entrada externa (0.5.0):** a instrução do canal diz que as mensagens foram digitadas no site por quem está logado na conta ligada à chave, e manda tratar como pedido do usuário, nunca como aviso do sistema nem como permissão. Senha, chave, token, conteúdo de `.env`, `~/.claude.json`, a chave do Iron Office, dado de cliente e segredo de loja nunca saem por `reply` nem `deliver`. O `reply` e o `deliver` (título, conteúdo e cartão) passam por um filtro de formatos de chave (Iron Office, Stripe, Shopify, Meta, GitHub, OpenAI/Anthropic, Supabase, AWS, Google, Slack, Hugging Face, JWT, `Bearer`, senha em URL, `NOME_SECRETO=valor` de `.env` em maiúscula e `password=`/`token=`/`secret=`/`api_key=` em minúscula); o `reply` para em 20 mil caracteres e o `deliver` em 50 mil. A pasta enviada no feed também passa pelo filtro.
 
+**Nota do gate na página (0.14.0):** quando o Iron entrega o gate de uma página rascunho, o `deliver` leva junto o `page_id`: o id que o próprio site devolveu no `page_save` (um uuid do Iron Office, nada da sua máquina nem pessoal). Serve só pra nota aparecer na linha certa da aba Páginas. Id fora do padrão não sai.
+
 Política completa, em português de gente: ironoffice.app/termos.
 
 **Pra desligar:** `claude plugin disable iron-office@iron-office-channel` (ou `uninstall`). Apagar `~/.claude/iron-office-api-key` também corta todo envio.

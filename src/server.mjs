@@ -13,7 +13,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.13.0";
+const VERSION = "0.14.0";
+const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
 const LOCK_DIR = join(homedir(), ".iron");
@@ -422,6 +423,8 @@ const INSTRUCTIONS = DEGRADED
       "Pedido de imagem ('gera uma imagem', 'variação da imagem <id>', 'sobe essa na Shopify', 'tira essa da Shopify'): carregue a skill `imagens`; custo pelo `image_generate` com dry_run e o sim pelo `ask` antes de gerar; subir na Shopify só pelo `image_to_shopify` depois do sim no `ask`.",
       "Pedido `trilha: <etapa>` ou `continuar a trilha`: carregue a skill `trilha`, chame `trail_status` antes de agir e `trail_update` depois de medir; nunca marque `provada` sem a prova medida.",
       "Perguntas ao aluno: UMA por mensagem, pela ferramenta `ask` com opções quando couber (até 6) e `skip`; espere a resposta antes da próxima; nunca mande lista de perguntas.",
+      "Oferecer CAMINHOS ao aluno ('preencher as lacunas agora ou montar com o que tem', 'duplicar o tema ou editar a cópia que já existe', 'A ou B') é sempre `ask` com uma opção por caminho (até 6) e `skip`. Nunca prosa que pede pra ele digitar uma palavra-chave ('me diga X ou Y', 'responda montar'): o aluno clica, não digita comando.",
+      "PÁGINA PRONTA (depois do `page_save` do lp-cinematico/iron-clone; na trilha de persuasão só depois da v2; página da Shopify depois do sim do aluno): pergunte pela `ask` 'Quer que eu rode o gate nessa página?' com as opções 'Sim, roda o gate' e 'Depois'. No Sim: carregue a skill `gate` (seção 'No Iron Office'), rode, e entregue pelo `deliver` com `agent` 'gate', `type` 'gate', o JSON do `## Cartão` em `card` e a página: `url` se ela está no ar, senão `page_id` (o id que o `page_save` devolveu). O `reply` final: 3 linhas (nota, o maior achado, o próximo passo) e a url do parecer POR ÚLTIMO. No 'Depois': 1 linha ('Combinado. A página fica na aba Páginas; peça o gate quando quiser.') e não ofereça de novo pra mesma página nesta conversa. Nunca em prosa, nunca 'digite gate'. Dentro do Office o iron-clone e o lp-cinematico NÃO rodam o gate por conta própria: quem decide é o aluno pelo botão.",
       "Faltam DADOS que o aluno sabe (preço, garantia, frete, prazo, quantidade, nome): mande UM formulário pela `ask` com `fields` (até 12 campos; `kind` text, number, money ou yesno; sem `options`). Mais de 12: o 2º formulário só depois do 1º voltar. A resposta chega como UMA mensagem do aluno com 'rótulo: valor' por linha ('(pulado)' = ele pulou). Nunca escreva 'faltam N dados, veja na entrega' nem mande a lista pra um relatório: as perguntas ficam no chat.",
       "Pedido de página de vendas na lógica de uma referência ('quero vender como esta página', 'no estilo de…', 'copia a lógica dessa página'): ANTES de chamar o iron-clone, pergunte pela `ask`, uma por vez: (1) 'Quer que eu reaproveite frases da página de referência?' com as opções 'Não, escreva do zero (recomendado)' e 'Sim, pode reaproveitar trechos'; (2) só se a ficha da loja não tem a seção `## Voz` (o campo 'Tom de voz' sozinho, só com o rótulo, não basta): 'Me manda um texto seu que vendeu' (free + skip), 'Como você fala com o seu cliente?' (Formal · Próximo · Divertido · Direto e agressivo) e 'Tem alguma palavra que você NÃO quer na sua página?' (free + skip). Passe as respostas no pedido ao iron-clone (ele grava em `## 0. Escolhas`); dado da oferta que falta (preço, provas) não trava: vira campo do formulário do fim. No fim, nesta ordem: (1) `reply` com 3 linhas: o que fez e o risco maior; (2) o formulário (`ask` com `fields`) com os dados que faltam e que o aluno sabe, e numa linha cada o que depende de terceiro ('pra conseguir com <quem>'); (3) `reply` de 1 linha com a url da entrega (não é pergunta: vai logo depois do formulário). Quando o ÚLTIMO formulário voltar: carregue a skill `clone-persuasion`, reescreva SÓ a seção 6 (montador) com as respostas, sem refazer o estudo, rode de novo a anti-cópia e o `escrita.py` dela, e entregue a v2 pelo `deliver` (NÃO chame `page_save` de novo: o rascunho em Páginas aponta pra mesma pasta, que agora tem a v2). Se a `ask` recusar `fields` (site ou plugin antigo), diga em 1 linha 'Pra responder num formulário, feche e abra o ironoffice' e pergunte os dados um por vez (`ask` com free e skip); nunca vire lista no relatório.",
       "Ação de pedido: o cartão já apareceu acima da sua resposta; diga 'confirme no cartão acima' em 1 linha, sem repetir o conteúdo do cartão.",
@@ -483,6 +486,7 @@ const TOOLS = DEGRADED
             },
             project_id: { type: "string", description: "Opcional: id da loja da entrega. Sem ele, a loja da última mensagem." },
             url: { type: "string", description: "Opcional: a URL da página auditada ou entregue (https://…); o site liga a entrega à página na aba Páginas." },
+            page_id: { type: "string", description: "Opcional: id da página rascunho que o `page_save` devolveu; o site liga a nota à linha dela em Páginas. Com `url`, não precisa." },
           },
           required: ["title", "agent", "content"],
         },
@@ -637,7 +641,7 @@ const TOOLS = DEGRADED
       {
         name: "page_save",
         description:
-          "Registra na aba Páginas do Iron Office uma página que o Iron fez (lp-cinematico, iron-clone, página criada na Shopify fora do produto). Com `url` (já no ar) o site abre a página e mostra se está no ar; só com `local_path` (pasta no computador) ela fica como rascunho. Mesma URL de novo = atualiza, não duplica. Nunca publique a página sozinho. Só na sessão aberta com ironoffice. Devolve { id, status, url_aba }.",
+          "Registra na aba Páginas do Iron Office uma página que o Iron fez (lp-cinematico, iron-clone, página criada na Shopify fora do produto). Com `url` (já no ar) o site abre a página e mostra se está no ar; só com `local_path` (pasta no computador) ela fica como rascunho. Mesma URL de novo = atualiza, não duplica. Nunca publique a página sozinho. Só na sessão aberta com ironoffice. Devolve { id, status, url_aba }. Guarde o `id` devolvido: é o `page_id` do `deliver` do gate.",
         inputSchema: {
           type: "object",
           properties: {
@@ -750,16 +754,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!title || !content.trim()) return text("title e content são obrigatórios.", true);
     // 0.12.0 (onda 30): a página auditada; fora da regra não vai (o site também ignora, a entrega não se perde)
     const pageUrl = pageUrlArg(args.url);
+    // 0.14.0 (onda 31b rev2): a página rascunho pelo id do page_save; fora do padrão não vai e a entrega sai
+    const rawPageId = typeof args.page_id === "string" ? args.page_id.trim().toLowerCase() : "";
+    const pageId = PAGE_ID_RE.test(rawPageId) ? rawPageId : "";
+    const pageIdNote = rawPageId && !pageId ? " page_id ignorado: não é o id que o page_save devolveu." : "";
     try {
       const res = await api("/api/deliverables", {
         method: "POST",
         // o cartão vai como veio: quem poda nos limites é o servidor
-        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...(card ? { card } : {}), ...(storeArg(args) ? { project_id: storeArg(args) } : {}), ...(pageUrl ? { page_url: pageUrl } : {}) },
+        body: { agent_name: agent, title, content, tags: type ? [type] : [], ...(card ? { card } : {}), ...(storeArg(args) ? { project_id: storeArg(args) } : {}), ...(pageUrl ? { page_url: pageUrl } : {}), ...(pageId ? { page_id: pageId } : {}) },
       });
       const id = res?.deliverable?.id;
       if (typeof id !== "string" || !id) return text("O Iron Office não devolveu o id da entrega.", true);
       const url = `${BASE}/deliverables?id=${encodeURIComponent(id)}`;
-      return text(JSON.stringify({ id, url }));
+      return text(JSON.stringify({ id, url }) + pageIdNote);
     } catch (e) {
       return text(`Falhou ao salvar a entrega: ${e.message}`, true);
     }
