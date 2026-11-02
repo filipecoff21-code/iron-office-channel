@@ -94,6 +94,8 @@ Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair
 
 **Instruções cabem no corte (0.15.0):** o Claude Code só entrega ao Iron os primeiros 4 096 caracteres das instruções de um plugin. O bloco deste canal tem menos de 3 900, e um teste trava isso: regra nova entra só tirando outra. O resto das regras vive na skill `office-fluxos` (dentro do plugin, sem nada pessoal) e nas descrições das ferramentas. Quando o pedido é uma página na lógica de uma referência, o plugin põe uma linha `[iron-office: …]` no começo da mensagem, lembrando o Iron de perguntar antes se pode reaproveitar frases. O `page_save` e o `deliver` devolvem o passo seguinte (formulário ou a pergunta do gate). Lacuna do fornecedor também vira formulário, e o que você pular aparece como "dado pendente" na página. Nada disso sai da sua máquina.
 
+**Período dos anúncios (0.16.1):** a descrição do `ads_status` aceita `window_days` 7, 15 ou 30 (a janela que o aluno escolheu na aba Anúncios) e o alerta `recusada_antiga` (recusada em campanha parada e sem gasto, que o site mostra numa linha cinza). O bloco de instruções não mudou.
+
 **Minerar (0.16.0):** "o que está vendendo em <país>", "minerar" e "produto vencedor" entram no gatilho do bloco de instruções e levam o Iron à skill `minerar` (vem no pacote `iron-edge`). A ferramenta `ask` aceita `link: "dropkiller"`: o site desenha, embaixo das opções, o botão de assinar o DropKiller. O campo leva só a chave, nunca uma URL: o link mora no site, não no plugin. Chave desconhecida, ou `link` num formulário, é recusada.
 
 Política completa, em português de gente: ironoffice.app/termos.

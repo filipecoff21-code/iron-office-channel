@@ -1640,7 +1640,38 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const q2 = f.calls.filter((c) => c.path === "/api/chat/messages").pop()?.body?.meta?.question;
   check("43 ask sem link → meta.question sem a chave link (igual à 0.15.0)", q2 && !("link" in q2) && q2.options.length === 2, JSON.stringify(q2));
-  check("43 initialize → 0.16.0", init?.serverInfo?.version === "0.16.0", JSON.stringify(init?.serverInfo));
+  check("43 initialize → a versão do package.json", init?.serverInfo?.version === JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version, JSON.stringify(init?.serverInfo));
+  s.p.kill();
+  f.srv.close();
+}
+
+// ─── 22. onda 45a (0.16.1): ads_status com período e recusada_antiga; bloco intacto ───
+{
+  console.log("onda 45a (0.16.1)");
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+  });
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
+  const ins = init?.instructions ?? "";
+  s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+  await sleep(400);
+  const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
+  check("45a ads_status: descrição com 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
+  check("45a initialize → 0.16.1", init?.serverInfo?.version === "0.16.1", JSON.stringify(init?.serverInfo));
+  let antigos = null;
+  try {
+    const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
+    const ini = src.indexOf("  : [\n      // 0.15.0 (31b rev4)");
+    const fim = src.indexOf("].join(", ini);
+    antigos = new Function(`return [${src.slice(ini + 5, fim)}]`)();
+  } catch (e) {
+    antigos = null;
+  }
+  const novos = ins.split("\n");
+  check("45a bloco: os 13 itens iguais aos da v0.16.0, 3881 caracteres", !!antigos && antigos.length === 13 && novos.length === 13 && novos.every((l, i) => l === antigos[i]) && ins.length === 3881, `tamanho ${ins.length}`);
   s.p.kill();
   f.srv.close();
 }
