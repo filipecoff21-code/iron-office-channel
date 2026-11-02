@@ -626,6 +626,11 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   writeFileSync(join(cheio, ".claude.json"), JSON.stringify({ mcpServers: muitos }));
   const b5 = await rodar(cheio);
   check("mais de 50: corta em 50 e meta-ads vem primeiro", b5?.mcp_servers?.length === 50 && b5.mcp_servers[0] === "meta-ads", JSON.stringify(b5?.mcp_servers?.slice(0, 3)));
+  // onda 43: o dropkiller (cartão em Integrações → Mineração) também entra antes do corte
+  const cheio2 = casa();
+  writeFileSync(join(cheio2, ".claude.json"), JSON.stringify({ mcpServers: Object.fromEntries([...Array.from({ length: 80 }, (_, i) => [`k${i}`, {}]), ["dropkiller", {}]]) }));
+  const b5b = await rodar(cheio2);
+  check("mais de 50: dropkiller no fim da lista entra antes do corte", b5b?.mcp_servers?.length === 50 && b5b.mcp_servers.includes("dropkiller"), JSON.stringify(b5b?.mcp_servers?.slice(0, 3)));
   // 0.8.0: extensão Claude in Chrome (2 booleanos no ~/.claude.json, fora de mcpServers)
   const chromeOn = casa();
   writeFileSync(join(chromeOn, ".claude.json"), JSON.stringify({ cachedChromeExtensionInstalled: true, claudeInChromeDefaultEnabled: true, mcpServers: { "meta-ads": {} } }));
@@ -1625,6 +1630,9 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 11, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: "shopify" });
   await sleep(400);
   check("43 ask com link desconhecido ('shopify') → isError 'só a chave 'dropkiller'', nada enviado", res(s, 11)?.isError === true && txt(s, 11).includes("só a chave 'dropkiller'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
+  call(s, 14, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: ["dropkiller"] });
+  await sleep(400);
+  check("43 ask com link em lista (['dropkiller']) → recusado como o site recusa, nada enviado", res(s, 14)?.isError === true && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 14));
   call(s, 12, "ask", { chat_id: "c1", question: "Dados", fields: [{ id: "preco", label: "Preço" }], link: "dropkiller" });
   await sleep(400);
   check("43 ask com fields + link → recusado (o site também recusa), nada enviado", res(s, 12)?.isError === true && txt(s, 12).includes("link não vai no formulário") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 12));

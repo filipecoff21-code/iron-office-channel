@@ -953,8 +953,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
     // 0.16.0 (onda 43): link por CHAVE, nunca URL; quem conhece a URL é o site
-    const link = args.link === undefined ? undefined : String(args.link);
-    if (link !== undefined && link !== "dropkiller") return text("link: só a chave 'dropkiller' existe hoje.", true);
+    // gate 43: só string (o site recusa não-string; String(["dropkiller"]) passaria aqui)
+    const link = args.link;
+    if (link !== undefined && (typeof link !== "string" || link !== "dropkiller")) return text("link: só a chave 'dropkiller' existe hoje.", true);
     if (raw.length > Q_OPTIONS_MAX) return text(`Opções demais (${raw.length}; máximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;
@@ -1350,7 +1351,7 @@ function presenceOnce() {
 // Arquivo ausente conta como nada; quebrado (~/.claude.json ou .mcp.json, ex.: lido no meio de uma escrita)
 // devolve null e a presença sai sem o campo, pro site manter a lista anterior em vez de apagar.
 const MAX_MCP = 50;
-const MCP_PRIORITY = ["meta-ads", "claude-in-chrome"]; // o que o site mede entra antes do corte de 50
+const MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "dropkiller"]; // o que o site mede entra antes do corte de 50 (onda 43: + dropkiller, cartão em Integrações)
 // 0.8.0 (onda 27a): a extensão Claude in Chrome não mora em mcpServers; o Claude Code guarda 2 booleanos no
 // ~/.claude.json. Instalada e não desligada = o nome "claude-in-chrome" entra na lista (o cartão Chrome lê isso).
 const CHROME = "claude-in-chrome";

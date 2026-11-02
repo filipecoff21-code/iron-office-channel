@@ -17840,8 +17840,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(`Falhou ao enviar o formul\xE1rio: ${e.message}`, true);
       }
     }
-    const link = args.link === void 0 ? void 0 : String(args.link);
-    if (link !== void 0 && link !== "dropkiller") return text("link: s\xF3 a chave 'dropkiller' existe hoje.", true);
+    const link = args.link;
+    if (link !== void 0 && (typeof link !== "string" || link !== "dropkiller")) return text("link: s\xF3 a chave 'dropkiller' existe hoje.", true);
     if (raw.length > Q_OPTIONS_MAX) return text(`Op\xE7\xF5es demais (${raw.length}; m\xE1ximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;
@@ -18209,7 +18209,7 @@ function presenceOnce() {
   return presenceInFlight;
 }
 var MAX_MCP = 50;
-var MCP_PRIORITY = ["meta-ads", "claude-in-chrome"];
+var MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "dropkiller"];
 var CHROME = "claude-in-chrome";
 function mcpKeys(obj) {
   const m = obj && typeof obj === "object" ? obj.mcpServers : null;
