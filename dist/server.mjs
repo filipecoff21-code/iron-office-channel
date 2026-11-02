@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.15.0";
+var VERSION = "0.16.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
@@ -17448,7 +17448,7 @@ var INSTRUCTIONS = DEGRADED ? [
   "Resultado longo (relat\xF3rio de subagente, auditoria, spy, copy longa, plano): `deliver` com t\xEDtulo, agente e conte\xFAdo completo ANTES do `reply`; o `reply` termina com a url devolvida. Auditoria/Spy: o JSON do bloco `## Cart\xE3o` vai em `card`, sem reescrever, e a p\xE1gina auditada em `url`; o `reply` vira 1\u20132 linhas + url.",
   "P\xE1gina terminada (lp-cinematico, iron-clone, p\xE1gina da Shopify fora do produto): `page_save` com t\xEDtulo, tipo e a URL (no ar) ou a pasta (rascunho). Quem publica \xE9 o aluno, nunca voc\xEA.",
   "Loja: a 1\xAA linha `[loja: \u2026]` \xE9 a loja ativa do aluno; se tem ficha, leia-a antes de responder; se diz `ficha: ainda sem ficha` e o pedido \xE9 da loja, ofere\xE7a em 1 linha montar a ficha (skill `loja`) e espere o sim. O iron-shopify usa `shop_status` e `shop_query` deste plugin, nunca `curl`. Leituras, `reply` e `deliver` v\xE3o pra loja da \xFAltima mensagem; mutation leva sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: \u2026]`).",
-  "Gatilho \u2192 skill, ANTES de agir: `an\xFAncios: atualizar` ou 'como est\xE3o meus an\xFAncios' \u2192 `anuncios`; imagem ('gera uma imagem', 'varia\xE7\xE3o da imagem <id>', 'sobe/tira essa da Shopify') \u2192 `imagens`; `trilha: <etapa>` ou 'continuar a trilha' \u2192 `trilha`; p\xE1gina de vendas na l\xF3gica de uma refer\xEAncia ('quero vender como esta p\xE1gina', 'no estilo de\u2026'), p\xE1gina pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido \u2192 `office-fluxos`.",
+  "Gatilho \u2192 skill, ANTES de agir: `an\xFAncios: atualizar` ou 'como est\xE3o meus an\xFAncios' \u2192 `anuncios`; imagem ('gera uma imagem', 'varia\xE7\xE3o da imagem <id>', 'sobe/tira essa da Shopify') \u2192 `imagens`; `trilha: <etapa>` ou 'continuar a trilha' \u2192 `trilha`; 'o que est\xE1 vendendo em <pa\xEDs>', 'minerar', 'produto vencedor' \u2192 `minerar`; p\xE1gina de vendas na l\xF3gica de uma refer\xEAncia ('quero vender como esta p\xE1gina'), p\xE1gina pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido \u2192 `office-fluxos`.",
   "Ferramenta da Meta que n\xE3o existe nesta sess\xE3o, ou pedido `/mcp`: responda os 3 passos (no terminal: `/mcp` \u2192 `meta-ads` \u2192 entrar com o Facebook; depois fechar e abrir o `ironoffice`), nunca 'n\xE3o funciona aqui'.",
   "Pergunta ao aluno \xE9 `ask`: UMA por mensagem, com op\xE7\xF5es (at\xE9 6) e `skip`; espere a resposta. Vale pra sim/n\xE3o, oferta de UMA a\xE7\xE3o e CAMINHOS ('A ou B', uma op\xE7\xE3o por caminho): o aluno clica, n\xE3o digita comando. Um `reply` NUNCA termina com pergunta nem com '\xE9 s\xF3 responder X', 'escreve X', 'me diga X': se precisa de resposta, a \xFAltima chamada da rodada \xE9 uma `ask`. Dados que faltam, do aluno OU do fornecedor: UM formul\xE1rio (`ask` com `fields`, at\xE9 12); o que ele pular vira 'dado pendente'; nunca 'me manda depois' sem formul\xE1rio.",
   "LOTE: duas ou mais tags antes de responder = cada uma tem a sua resposta, na ordem; 'Pular' recebe 1 linha. O retorno das ferramentas avisa mensagem sem resposta e passo pendente: n\xE3o encerre a rodada com aviso em aberto.",
@@ -17524,7 +17524,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "ask",
-    description: "Faz UMA pergunta ao aluno no chat do Iron Office, com bot\xF5es de op\xE7\xE3o (at\xE9 6), campo livre e 'Pular'; OU um formul\xE1rio (`fields`, at\xE9 12 campos, cada um com 'Pular este' e um bot\xE3o 'Enviar respostas'). O clique do aluno chega como mensagem normal do canal (formul\xE1rio: 'r\xF3tulo: valor' por linha). S\xF3 na sess\xE3o do canal. Uma pergunta (ou um formul\xE1rio) por vez: espere a resposta antes da pr\xF3xima. Sim/n\xE3o, oferta de uma a\xE7\xE3o e caminhos ('A ou B') s\xE3o ask, nunca prosa. Dados que faltam, do aluno ou do fornecedor, v\xE3o em fields; o que ele pular vira 'dado pendente'.",
+    description: "Faz UMA pergunta ao aluno no chat do Iron Office, com bot\xF5es de op\xE7\xE3o (at\xE9 6), campo livre e 'Pular'; OU um formul\xE1rio (`fields`, at\xE9 12 campos, cada um com 'Pular este' e um bot\xE3o 'Enviar respostas'). O clique do aluno chega como mensagem normal do canal (formul\xE1rio: 'r\xF3tulo: valor' por linha). S\xF3 na sess\xE3o do canal. Uma pergunta (ou um formul\xE1rio) por vez: espere a resposta antes da pr\xF3xima. Sim/n\xE3o, oferta de uma a\xE7\xE3o e caminhos ('A ou B') s\xE3o ask, nunca prosa. Dados que faltam, do aluno ou do fornecedor, v\xE3o em fields; o que ele pular vira 'dado pendente'. `link: \"dropkiller\"` acrescenta o bot\xE3o de assinar o DropKiller (s\xF3 nessa pergunta).",
     inputSchema: {
       type: "object",
       properties: {
@@ -17542,6 +17542,7 @@ var TOOLS = DEGRADED ? [
           description: "Opcional: formul\xE1rio, 1 a 12 campos { id (a-z, 0-9, _; at\xE9 24), label (at\xE9 80), placeholder (at\xE9 60), kind: text | number | money | yesno }. Com fields, n\xE3o mande options.",
           items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, kind: { type: "string", enum: FIELD_KINDS } }, required: ["id", "label"] }
         },
+        link: { type: "string", enum: ["dropkiller"], description: "Opcional: chave de um bot\xE3o com link que o site conhece (hoje s\xF3 'dropkiller' = assinar o DropKiller com o link do Iron Office). Nunca uma URL." },
         project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da \xFAltima mensagem." }
       },
       required: ["chat_id", "question"]
@@ -17808,6 +17809,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const raw = Array.isArray(args.options) ? args.options : [];
     if (args.fields !== void 0) {
       if (raw.length > 0) return text("Formul\xE1rio (fields) e op\xE7\xF5es (options) n\xE3o v\xE3o juntos: mande um ou outro.", true);
+      if (args.link !== void 0) return text("link n\xE3o vai no formul\xE1rio: mande o link numa ask com options.", true);
       if (!Array.isArray(args.fields) || args.fields.length === 0) return text("fields tem que ser uma lista de 1 a 12 campos.", true);
       if (args.fields.length > Q_FIELDS_MAX) return text(`Campos demais (${args.fields.length}; m\xE1ximo ${Q_FIELDS_MAX}). Mande os 12 mais importantes e o resto num 2\xBA formul\xE1rio depois que este voltar.`, true);
       const fields = [];
@@ -17838,6 +17840,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(`Falhou ao enviar o formul\xE1rio: ${e.message}`, true);
       }
     }
+    const link = args.link === void 0 ? void 0 : String(args.link);
+    if (link !== void 0 && link !== "dropkiller") return text("link: s\xF3 a chave 'dropkiller' existe hoje.", true);
     if (raw.length > Q_OPTIONS_MAX) return text(`Op\xE7\xF5es demais (${raw.length}; m\xE1ximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;
@@ -17858,7 +17862,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const store = storeArg(args);
       const res = await api("/api/chat/messages", {
         method: "POST",
-        body: { conversation_id: chatId || null, text: q, meta: { ...store ? { project_id: store } : {}, question: { text: q, options, free, skip } } }
+        body: { conversation_id: chatId || null, text: q, meta: { ...store ? { project_id: store } : {}, question: { text: q, options, free, skip, ...link ? { link } : {} } } }
       });
       return text(`Pergunta enviada (id ${res?.id ?? "?"}). Espere a resposta do aluno antes da pr\xF3xima.` + avisosDoAsk(chatId || DEFAULT_CONVERSATION));
     } catch (e) {

@@ -2,7 +2,7 @@
 // Iron Office, roda o dist/server.mjs e o hooks/post-event.mjs contra ele com HOME temporário.
 // Cobre os achados do gate de 06/10/2026: entrega em 2 fases (ack), nada antes do handshake,
 // sessão comum não puxa, lock atômico com reassunção, e o hook não vaza segredo.
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1393,7 +1393,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("rev3 instrução: reaproveitar frases SEMPRE, opcional", /SEMPRE, em toda página nova, mesmo que a ficha tenha `## Voz`/.test(SKILL) && /`skip` = Não/.test(SKILL));
   check("rev3 instrução: fim da trilha P = v2 pelo deliver e ask do gate", /a rodada tem UM fim, nesta ordem/.test(SKILL) && /\(2\) `deliver` da v2/.test(SKILL) && /\(3\) a `ask` do gate/.test(SKILL) && /Texto sem `deliver` = trilha sem fim/.test(SKILL));
   check("rev3 instrução: LOTE responde cada mensagem", /^LOTE: /m.test(ins) && /cada uma tem a sua resposta/.test(ins));
-  check("initialize devolve a versão do plugin (0.15.0)", init?.serverInfo?.version === "0.15.0", JSON.stringify(init?.serverInfo));
+  check("initialize devolve a versão do plugin (a do package.json)", init?.serverInfo?.version === JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version, JSON.stringify(init?.serverInfo));
 
   // lote: 2 mensagens em c1 → o 1º reply avisa a 2ª; o 2º não avisa
   fila.push(msg("l1", "Pular esta"), msg("l2", "trilha: montar a página da Cloud Rock"));
@@ -1577,6 +1577,62 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     t.p.kill();
     g.srv.close();
   }
+  s.p.kill();
+  f.srv.close();
+}
+
+// ─── 21. onda 43 (0.16.0): gatilho minerar, ask com link ───
+{
+  console.log("onda 43 (0.16.0)");
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/chat/messages") return { json: { id: "q-43" } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
+  const ins = init?.instructions ?? "";
+  console.log(`  (bloco de instruções: ${ins.length} caracteres)`);
+  check("43 tamanho: bloco ≤ 3900 e ≥ 3000 (esperado 3881)", ins.length <= 3900 && ins.length >= 3000, `tamanho ${ins.length}`);
+  check("43 gatilho: 'minerar', 'produto vencedor' → `minerar` no item 8, e saiu o 'no estilo de…'", ins.includes("'minerar', 'produto vencedor' → `minerar`") && !ins.includes("'no estilo de…'"));
+  // os outros 12 itens: idênticos byte a byte aos da v0.15.0 (lidos da tag, não de cópia no teste)
+  let antigos = null;
+  try {
+    const src = execFileSync("git", ["show", "v0.15.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
+    const ini = src.indexOf("  : [\n      // 0.15.0 (31b rev4)");
+    const fim = src.indexOf("].join(", ini);
+    antigos = new Function(`return [${src.slice(ini + 5, fim)}]`)();
+  } catch (e) {
+    antigos = null;
+  }
+  const novos = ins.split("\n");
+  const difs = antigos ? novos.map((l, i) => (l === antigos[i] ? -1 : i)).filter((i) => i >= 0) : [];
+  check("43 bloco: só o item 8 mudou; os outros 12 iguais aos da v0.15.0", !!antigos && antigos.length === 13 && novos.length === 13 && difs.length === 1 && novos[difs[0]].startsWith("Gatilho → skill"), antigos ? `linhas que mudaram: ${difs.join(",")}` : "não li a v0.15.0 pelo git");
+  s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+  await sleep(400);
+  const ask = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ask");
+  check("43 ask: inputSchema.link.enum = ['dropkiller'] e a descrição cita link: \"dropkiller\"", JSON.stringify(ask?.inputSchema?.properties?.link?.enum) === '["dropkiller"]' && (ask?.description ?? "").includes('link: "dropkiller"'));
+  const antes = f.calls.filter((c) => c.path === "/api/chat/messages").length;
+  call(s, 10, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Já assinei: liga o DropKiller", "Depois"], skip: true, link: "dropkiller" });
+  await sleep(500);
+  const enviadas = f.calls.filter((c) => c.path === "/api/chat/messages");
+  const q = enviadas[enviadas.length - 1]?.body?.meta?.question;
+  check("43 ask com link 'dropkiller' → o site recebe meta.question.link = 'dropkiller' (com as opções)", enviadas.length === antes + 1 && q?.link === "dropkiller" && q?.options?.length === 2 && res(s, 10)?.isError !== true, JSON.stringify(q));
+  call(s, 11, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: "shopify" });
+  await sleep(400);
+  check("43 ask com link desconhecido ('shopify') → isError 'só a chave 'dropkiller'', nada enviado", res(s, 11)?.isError === true && txt(s, 11).includes("só a chave 'dropkiller'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
+  call(s, 12, "ask", { chat_id: "c1", question: "Dados", fields: [{ id: "preco", label: "Preço" }], link: "dropkiller" });
+  await sleep(400);
+  check("43 ask com fields + link → recusado (o site também recusa), nada enviado", res(s, 12)?.isError === true && txt(s, 12).includes("link não vai no formulário") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 12));
+  call(s, 13, "ask", { chat_id: "c1", question: "Sem link?", options: ["A", "B"] });
+  await sleep(400);
+  const q2 = f.calls.filter((c) => c.path === "/api/chat/messages").pop()?.body?.meta?.question;
+  check("43 ask sem link → meta.question sem a chave link (igual à 0.15.0)", q2 && !("link" in q2) && q2.options.length === 2, JSON.stringify(q2));
+  check("43 initialize → 0.16.0", init?.serverInfo?.version === "0.16.0", JSON.stringify(init?.serverInfo));
   s.p.kill();
   f.srv.close();
 }

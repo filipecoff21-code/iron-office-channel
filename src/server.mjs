@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.15.0";
+const VERSION = "0.16.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -522,7 +522,7 @@ const INSTRUCTIONS = DEGRADED
       "Resultado longo (relatório de subagente, auditoria, spy, copy longa, plano): `deliver` com título, agente e conteúdo completo ANTES do `reply`; o `reply` termina com a url devolvida. Auditoria/Spy: o JSON do bloco `## Cartão` vai em `card`, sem reescrever, e a página auditada em `url`; o `reply` vira 1–2 linhas + url.",
       "Página terminada (lp-cinematico, iron-clone, página da Shopify fora do produto): `page_save` com título, tipo e a URL (no ar) ou a pasta (rascunho). Quem publica é o aluno, nunca você.",
       "Loja: a 1ª linha `[loja: …]` é a loja ativa do aluno; se tem ficha, leia-a antes de responder; se diz `ficha: ainda sem ficha` e o pedido é da loja, ofereça em 1 linha montar a ficha (skill `loja`) e espere o sim. O iron-shopify usa `shop_status` e `shop_query` deste plugin, nunca `curl`. Leituras, `reply` e `deliver` vão pra loja da última mensagem; mutation leva sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: …]`).",
-      "Gatilho → skill, ANTES de agir: `anúncios: atualizar` ou 'como estão meus anúncios' → `anuncios`; imagem ('gera uma imagem', 'variação da imagem <id>', 'sobe/tira essa da Shopify') → `imagens`; `trilha: <etapa>` ou 'continuar a trilha' → `trilha`; página de vendas na lógica de uma referência ('quero vender como esta página', 'no estilo de…'), página pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido → `office-fluxos`.",
+      "Gatilho → skill, ANTES de agir: `anúncios: atualizar` ou 'como estão meus anúncios' → `anuncios`; imagem ('gera uma imagem', 'variação da imagem <id>', 'sobe/tira essa da Shopify') → `imagens`; `trilha: <etapa>` ou 'continuar a trilha' → `trilha`; 'o que está vendendo em <país>', 'minerar', 'produto vencedor' → `minerar`; página de vendas na lógica de uma referência ('quero vender como esta página'), página pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido → `office-fluxos`.",
       "Ferramenta da Meta que não existe nesta sessão, ou pedido `/mcp`: responda os 3 passos (no terminal: `/mcp` → `meta-ads` → entrar com o Facebook; depois fechar e abrir o `ironoffice`), nunca 'não funciona aqui'.",
       "Pergunta ao aluno é `ask`: UMA por mensagem, com opções (até 6) e `skip`; espere a resposta. Vale pra sim/não, oferta de UMA ação e CAMINHOS ('A ou B', uma opção por caminho): o aluno clica, não digita comando. Um `reply` NUNCA termina com pergunta nem com 'é só responder X', 'escreve X', 'me diga X': se precisa de resposta, a última chamada da rodada é uma `ask`. Dados que faltam, do aluno OU do fornecedor: UM formulário (`ask` com `fields`, até 12); o que ele pular vira 'dado pendente'; nunca 'me manda depois' sem formulário.",
       "LOTE: duas ou mais tags antes de responder = cada uma tem a sua resposta, na ordem; 'Pular' recebe 1 linha. O retorno das ferramentas avisa mensagem sem resposta e passo pendente: não encerre a rodada com aviso em aberto.",
@@ -606,7 +606,7 @@ const TOOLS = DEGRADED
       {
         name: "ask",
         description:
-          "Faz UMA pergunta ao aluno no chat do Iron Office, com botões de opção (até 6), campo livre e 'Pular'; OU um formulário (`fields`, até 12 campos, cada um com 'Pular este' e um botão 'Enviar respostas'). O clique do aluno chega como mensagem normal do canal (formulário: 'rótulo: valor' por linha). Só na sessão do canal. Uma pergunta (ou um formulário) por vez: espere a resposta antes da próxima. Sim/não, oferta de uma ação e caminhos ('A ou B') são ask, nunca prosa. Dados que faltam, do aluno ou do fornecedor, vão em fields; o que ele pular vira 'dado pendente'.",
+          "Faz UMA pergunta ao aluno no chat do Iron Office, com botões de opção (até 6), campo livre e 'Pular'; OU um formulário (`fields`, até 12 campos, cada um com 'Pular este' e um botão 'Enviar respostas'). O clique do aluno chega como mensagem normal do canal (formulário: 'rótulo: valor' por linha). Só na sessão do canal. Uma pergunta (ou um formulário) por vez: espere a resposta antes da próxima. Sim/não, oferta de uma ação e caminhos ('A ou B') são ask, nunca prosa. Dados que faltam, do aluno ou do fornecedor, vão em fields; o que ele pular vira 'dado pendente'. `link: \"dropkiller\"` acrescenta o botão de assinar o DropKiller (só nessa pergunta).",
         inputSchema: {
           type: "object",
           properties: {
@@ -624,6 +624,7 @@ const TOOLS = DEGRADED
               description: "Opcional: formulário, 1 a 12 campos { id (a-z, 0-9, _; até 24), label (até 80), placeholder (até 60), kind: text | number | money | yesno }. Com fields, não mande options.",
               items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, kind: { type: "string", enum: FIELD_KINDS } }, required: ["id", "label"] },
             },
+            link: { type: "string", enum: ["dropkiller"], description: "Opcional: chave de um botão com link que o site conhece (hoje só 'dropkiller' = assinar o DropKiller com o link do Iron Office). Nunca uma URL." },
             project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da última mensagem." },
           },
           required: ["chat_id", "question"],
@@ -918,6 +919,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (args.fields !== undefined) {
       // 0.13.0 (31b rev1): formulário. Validação igual à do site (lib/question.ts), com a mensagem pro Iron consertar
       if (raw.length > 0) return text("Formulário (fields) e opções (options) não vão juntos: mande um ou outro.", true);
+      // 0.16.0 (onda 43): o botão de link é de pergunta com opções; o site recusa link em formulário, aqui também
+      if (args.link !== undefined) return text("link não vai no formulário: mande o link numa ask com options.", true);
       if (!Array.isArray(args.fields) || args.fields.length === 0) return text("fields tem que ser uma lista de 1 a 12 campos.", true);
       if (args.fields.length > Q_FIELDS_MAX) return text(`Campos demais (${args.fields.length}; máximo ${Q_FIELDS_MAX}). Mande os 12 mais importantes e o resto num 2º formulário depois que este voltar.`, true);
       const fields = [];
@@ -949,6 +952,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(`Falhou ao enviar o formulário: ${e.message}`, true);
       }
     }
+    // 0.16.0 (onda 43): link por CHAVE, nunca URL; quem conhece a URL é o site
+    const link = args.link === undefined ? undefined : String(args.link);
+    if (link !== undefined && link !== "dropkiller") return text("link: só a chave 'dropkiller' existe hoje.", true);
     if (raw.length > Q_OPTIONS_MAX) return text(`Opções demais (${raw.length}; máximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;
@@ -969,7 +975,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const store = storeArg(args);
       const res = await api("/api/chat/messages", {
         method: "POST",
-        body: { conversation_id: chatId || null, text: q, meta: { ...(store ? { project_id: store } : {}), question: { text: q, options, free, skip } } },
+        body: { conversation_id: chatId || null, text: q, meta: { ...(store ? { project_id: store } : {}), question: { text: q, options, free, skip, ...(link ? { link } : {}) } } },
       });
       return text(`Pergunta enviada (id ${res?.id ?? "?"}). Espere a resposta do aluno antes da próxima.` + avisosDoAsk(chatId || DEFAULT_CONVERSATION));
     } catch (e) {
