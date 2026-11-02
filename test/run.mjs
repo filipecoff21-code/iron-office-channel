@@ -1401,7 +1401,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("initialize devolve a versão do plugin (a do package.json)", init?.serverInfo?.version === JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version, JSON.stringify(init?.serverInfo));
 
   // lote: 2 mensagens em c1 → o 1º reply avisa a 2ª; o 2º não avisa
-  fila.push(msg("l1", "Pular esta"), msg("l2", "trilha: montar a página da Cloud Rock"));
+  fila.push(msg("l1", "Pular esta"), msg("l2", "trilha: montar a página do produto"));
   await sleep(2500);
   call(s, 10, "reply", { chat_id: "c1", text: "Pulei essa." });
   await sleep(500);
@@ -1516,7 +1516,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("rev4 F2: depois da ask, o reply não avisa mais", !/reaproveite frases/.test(txt(s, 13)) && res(s, 12)?.isError !== true, txt(s, 13));
 
   // page_save com trilha P viva → próximo = formulário com TODAS as lacunas
-  call(s, 14, "page_save", { project_id: LOJA, title: "LP Cloud Rock", kind: "clone", local_path: "paginas/cloud-rock" });
+  call(s, 14, "page_save", { project_id: LOJA, title: "LP do produto", kind: "clone", local_path: "paginas/produto" });
   await sleep(600);
   let ps = {};
   try { ps = JSON.parse(txt(s, 14)); } catch { /* nada */ }
@@ -1660,7 +1660,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
   check("45a ads_status: descrição com 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → 0.16.1", init?.serverInfo?.version === "0.16.1", JSON.stringify(init?.serverInfo));
+  check("45a initialize → versão atual", init?.serverInfo?.version === "0.17.0", JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1672,6 +1672,74 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   }
   const novos = ins.split("\n");
   check("45a bloco: os 13 itens iguais aos da v0.16.0, 3881 caracteres", !!antigos && antigos.length === 13 && novos.length === 13 && novos.every((l, i) => l === antigos[i]) && ins.length === 3881, `tamanho ${ins.length}`);
+  s.p.kill();
+  f.srv.close();
+}
+
+// ─── 23. onda 45b (0.17.0): ads_by_product; ids intactos, nome filtrado; bloco intacto ───
+{
+  console.log("onda 45b (0.17.0)");
+  const LOJA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === `/api/stores/${LOJA}/ads/by-product`) return { json: { has_shopify: true, utm_read: true, products: [], outside: { spend: 1, campaigns: [] }, pending: [], ad_handles: { "120248500156260289": "produto-exemplo" } } };
+    if (c.path === `/api/stores/${LOJA}/ads` && c.method === "POST") return { json: { ok: true, saved_at: "2026-11-02T18:00:00Z", pricing_summary: { text: "x", reading: "sobra", pricing_by_product: ["Produto A: a", "Produto B: b"] } } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+  const peca = { id: "120248500156260289", campaign_id: "120248500156220289", campaign_name: "Vendas zap (31) 99999-9999", objective: "OUTCOME_SALES", spend: 10, impressions: 5, extra: "não vai", purchases: null };
+  const fora = startServer(casa(), f.url, {});
+  fora.handshake();
+  await sleep(900);
+  call(fora, 2, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca] });
+  await sleep(300);
+  check("45b fora do modo ativo: recusa sem chamar o site", res(fora, 2)?.isError === true && !f.calls.some((c) => c.path.endsWith("/by-product")), txt(fora, 2));
+  fora.p.kill();
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
+  const ins = init?.instructions ?? "";
+  s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+  await sleep(400);
+  const tools = s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? [];
+  const tool = tools.find((t) => t.name === "ads_by_product");
+  const ads = tools.find((t) => t.name === "ads_status");
+  check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
+  check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
+  check("45b initialize → 0.17.0", init?.serverInfo?.version === "0.17.0", JSON.stringify(init?.serverInfo));
+  call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
+  call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
+  call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
+  call(s, 13, "ads_by_product", { project_id: "../x", days: 7, ads: [peca] });
+  const pend = { v: 2, at: "2026-11-02T17:55:00-03:00", account_id: "act_1000000000000002", currency: "BRL", spend: 10,
+    products: [{ handle: "bota-12-98457-7529", title: "Bota", spend: 1, campaigns: ["C 1"] }], outside: { spend: 1, campaigns: ["Aquec"] }, pending: [{ campaign_id: "9845757529", name: "Sem (31) 99999-9999", spend: 1, purchases: 0 }] };
+  call(s, 14, "ads_status", { project_id: LOJA, snapshot: pend });
+  await sleep(900);
+  const by = f.calls.filter((c) => c.path.endsWith("/by-product"));
+  const corpo = by[0]?.body ? (typeof by[0].body === "string" ? JSON.parse(by[0].body) : by[0].body) : null;
+  check("45b id de 18 dígitos chega intacto no site", corpo?.ads?.[0]?.id === "120248500156260289" && corpo?.ads?.[0]?.campaign_id === "120248500156220289", JSON.stringify(corpo?.ads?.[0]));
+  check("45b nome com telefone sai [removido]", corpo?.ads?.[0]?.campaign_name === "Vendas zap [removido]", corpo?.ads?.[0]?.campaign_name);
+  check("45b só os campos combinados vão; null da Meta segue null; manual vai", corpo && !("extra" in corpo.ads[0]) && corpo.ads[0].purchases === null && corpo.manual?.["120248500156220289"] === "fora", JSON.stringify(corpo?.ads?.[0]));
+  check("45b resposta com ad_handles intacto", txt(s, 10).includes("\"120248500156260289\":\"produto-exemplo\""), txt(s, 10).slice(0, 200));
+  check("45b 201 peças recusadas sem chamar o site", res(s, 11)?.isError === true && /200/.test(txt(s, 11)) && by.length === 1, txt(s, 11));
+  check("45b days e project_id inválidos recusados", res(s, 12)?.isError === true && res(s, 13)?.isError === true);
+  const gravou = f.calls.find((c) => c.path === `/api/stores/${LOJA}/ads` && c.method === "POST");
+  const snap = gravou?.body ? (typeof gravou.body === "string" ? JSON.parse(gravou.body) : gravou.body).snapshot : null;
+  check("45b scrubAds: products, outside e pending chegam; campaign_id e handle intactos; nome filtrado", snap?.products?.[0]?.handle === "bota-12-98457-7529" && snap?.products?.[0]?.campaigns?.[0] === "C 1" && snap?.outside?.campaigns?.[0] === "Aquec" && snap?.pending?.[0]?.campaign_id === "9845757529" && snap?.pending?.[0]?.name === "Sem [removido]", JSON.stringify(snap));
+  check("45b ads_status devolve pricing_by_product", txt(s, 14).includes("pricing_by_product") && txt(s, 14).includes("Produto B: b"), txt(s, 14));
+  let antigos = null;
+  try {
+    const src = execFileSync("git", ["show", "v0.16.1:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
+    const ini = src.indexOf("  : [\n      // 0.15.0 (31b rev4)");
+    const fim = src.indexOf("].join(", ini);
+    antigos = new Function(`return [${src.slice(ini + 5, fim)}]`)();
+  } catch (e) {
+    antigos = null;
+  }
+  const novos = ins.split("\n");
+  check("45b bloco: igual ao da v0.16.1, 3881 caracteres", !!antigos && novos.length === antigos.length && novos.every((l, i) => l === antigos[i]) && ins.length === 3881, `tamanho ${ins.length}`);
   s.p.kill();
   f.srv.close();
 }
