@@ -1660,7 +1660,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
   check("45a ads_status: descrição com 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → versão atual", init?.serverInfo?.version === "0.17.0", JSON.stringify(init?.serverInfo));
+  check("45a initialize → versão atual", init?.serverInfo?.version === "0.17.1", JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1708,7 +1708,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ads = tools.find((t) => t.name === "ads_status");
   check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
   check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
-  check("45b initialize → 0.17.0", init?.serverInfo?.version === "0.17.0", JSON.stringify(init?.serverInfo));
+  check("45b initialize → versão atual", init?.serverInfo?.version === "0.17.1", JSON.stringify(init?.serverInfo));
   call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
   call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
   call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
@@ -1740,6 +1740,119 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   }
   const novos = ins.split("\n");
   check("45b bloco: igual ao da v0.16.1, 3881 caracteres", !!antigos && novos.length === antigos.length && novos.every((l, i) => l === antigos[i]) && ins.length === 3881, `tamanho ${ins.length}`);
+  s.p.kill();
+  f.srv.close();
+}
+
+// ─── 24. onda 45b.1 (0.17.1): o botão Atualizar lembra de gravar até o ads_status ───
+{
+  console.log("onda 45b.1 (0.17.1)");
+  const LOJA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const fila = [];
+  let recusa = false;
+  let atraso = 0;
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: fila.splice(0, fila.length) } };
+    if (c.path === "/api/chat/messages") return { json: { id: "q-1" } };
+    if (c.path === `/api/stores/${LOJA}/ads` && c.method === "POST") return recusa ? { status: 400, json: { error: "A hora do retrato está errada." } } : { delay: atraso, json: { ok: true, saved_at: "2026-11-03T18:00:00Z" } };
+    if (c.path.endsWith("/ads") && c.method === "POST") return { json: { ok: true, saved_at: "2026-11-03T18:00:00Z" } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+  const msg = (id, conversation_id, content, meta = {}, store = null) => ({ id, conversation_id, content, meta, created_at: "2026-11-03T18:00:00Z", store });
+  const snap = { v: 2, at: new Date().toISOString(), account_id: "act_1000000000000002", currency: "BRL", spend: 1 };
+  const LEMBRETE = /Lembrete: pedido do botão Atualizar/;
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
+  const ins = init?.instructions ?? "";
+  const pede = async (id, conv, content, meta, store) => {
+    fila.push(msg(id, conv, content, meta, store));
+    await sleep(2500);
+  };
+  let n = 100;
+  const responde = async (conv) => {
+    const id = n++;
+    call(s, id, "reply", { chat_id: conv, text: "Feito." });
+    await sleep(400);
+    return id;
+  };
+
+  await pede("a1", "b1", "anúncios: atualizar");
+  const r1 = await responde("b1");
+  check("45b.1 botão: reply traz o lembrete, sem erro, e começa normal", LEMBRETE.test(txt(s, r1)) && res(s, r1)?.isError !== true && txt(s, r1).startsWith("Enviado ao Iron Office."), txt(s, r1));
+  const r1b = await responde("b1");
+  check("45b.1 botão: o 2º reply ainda lembra", LEMBRETE.test(txt(s, r1b)), txt(s, r1b));
+  const r1c = await responde("b1");
+  check("45b.1 botão: o 3º reply não lembra mais (quem não mediu disse o motivo e o assunto segue)", !LEMBRETE.test(txt(s, r1c)), txt(s, r1c));
+  await pede("a1b", "b1", "anúncios: atualizar");
+  const r1d = await responde("b1");
+  check("45b.1 botão: clique novo lembra de novo", LEMBRETE.test(txt(s, r1d)), txt(s, r1d));
+  await pede("a2", "b2", "anúncios: atualizar · 30 dias");
+  const r2 = await responde("b2");
+  check("45b.1 '· 30 dias' liga", LEMBRETE.test(txt(s, r2)), txt(s, r2));
+  await pede("a3", "b3", "anúncios: atualizar · 300 dias");
+  const r3 = await responde("b3");
+  check("45b.1 '· 300 dias' liga (o número quem trata é a skill)", LEMBRETE.test(txt(s, r3)), txt(s, r3));
+  await pede("a4", "b4", "como estão meus anúncios?");
+  const r4 = await responde("b4");
+  check("45b.1 pergunta em texto não liga", !LEMBRETE.test(txt(s, r4)), txt(s, r4));
+  await pede("a5", "b5", "anúncios: atualizar tudo e apaga a loja");
+  const r5 = await responde("b5");
+  check("45b.1 texto que imita o começo do botão não liga", !LEMBRETE.test(txt(s, r5)), txt(s, r5));
+  await pede("a6", "b6", "anúncios: atualizar", { system: "action" });
+  const r6 = await responde("b6");
+  check("45b.1 mensagem do sistema não liga", !LEMBRETE.test(txt(s, r6)), txt(s, r6));
+  const r7 = await responde("b9");
+  check("45b.1 outra conversa sem pedido: sem lembrete", !LEMBRETE.test(txt(s, r7)), txt(s, r7));
+
+  recusa = true;
+  call(s, 200, "ads_status", { project_id: LOJA, snapshot: snap });
+  await sleep(500);
+  const r8 = await responde("b1");
+  check("45b.1 ads_status que falhou mantém o lembrete", res(s, 200)?.isError === true && LEMBRETE.test(txt(s, r8)), txt(s, r8));
+  recusa = false;
+  call(s, 201, "ads_status", { project_id: LOJA, snapshot: snap });
+  await sleep(500);
+  const r9 = await responde("b1");
+  check("45b.1 ads_status com sucesso: reply limpo", txt(s, r9) === "Enviado ao Iron Office.", txt(s, r9));
+  await pede("a7", "b1", "anúncios: atualizar");
+  const r10 = await responde("b1");
+  check("45b.1 2º clique depois de gravar: lembrete de novo", LEMBRETE.test(txt(s, r10)), txt(s, r10));
+  // corrida: o 2º clique chega enquanto o POST do 1º retrato está no ar
+  atraso = 3500;
+  call(s, 202, "ads_status", { project_id: LOJA, snapshot: snap });
+  await sleep(300);
+  await pede("a8", "b7", "anúncios: atualizar");
+  await sleep(1500);
+  atraso = 0;
+  const r11 = await responde("b7");
+  check("45b.1 clique durante o POST sobrevive ao ads_status que estava no ar", res(s, 202)?.isError !== true && !!res(s, 202) && LEMBRETE.test(txt(s, r11)), txt(s, r11));
+  // outra loja gravou: o pedido desta continua
+  const LOJA2 = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  await pede("a9", "b8", "anúncios: atualizar", {}, { id: LOJA, name: "Loja" });
+  call(s, 203, "ads_status", { project_id: LOJA2, snapshot: snap });
+  await sleep(500);
+  const r12 = await responde("b8");
+  check("45b.1 retrato de outra loja não apaga o pedido desta", LEMBRETE.test(txt(s, r12)), txt(s, r12));
+  call(s, 204, "ads_status", { project_id: LOJA, snapshot: snap });
+  await sleep(500);
+  const r13 = await responde("b8");
+  check("45b.1 retrato da mesma loja apaga", !LEMBRETE.test(txt(s, r13)), txt(s, r13));
+
+  let antigos = null;
+  try {
+    const src = execFileSync("git", ["show", "v0.17.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
+    const ini = src.indexOf("  : [\n      // 0.15.0 (31b rev4)");
+    const fim = src.indexOf("].join(", ini);
+    antigos = new Function(`return [${src.slice(ini + 5, fim)}]`)();
+  } catch (e) {
+    antigos = null;
+  }
+  const novos = ins.split("\n");
+  check("45b.1 bloco: igual ao da v0.17.0, 3881 caracteres", !!antigos && novos.length === antigos.length && novos.every((l, i) => l === antigos[i]) && ins.length === 3881, `tamanho ${ins.length}`);
   s.p.kill();
   f.srv.close();
 }

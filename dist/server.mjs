@@ -17031,7 +17031,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.17.0";
+var VERSION = "0.17.1";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
@@ -17380,6 +17380,23 @@ function pedeEmProsa(body) {
   const ultima = (linhas[linhas.length - 1] ?? "").replace(/[\s)*_"'”’»\p{Extended_Pictographic}\uFE0F]+$/u, "");
   return /\?$/.test(ultima) || PROSA_PEDE_RE.test(body);
 }
+var ADS_REFRESH_RE = /^\s*anúncios: atualizar(?: · \d+ dias)?\s*$/i;
+var ADS_REFRESH_AVISO = "\nLembrete: pedido do bot\xE3o Atualizar. A aba s\xF3 sai da espera com o ads_status, mesmo com n\xFAmeros iguais: me\xE7a tudo, releia a ficha e grave (com Shopify, ads_by_product antes). Se n\xE3o deu pra medir, diga o motivo ao aluno e pare.";
+var ADS_REFRESH_MAX_AVISOS = 2;
+var adsRefresh = /* @__PURE__ */ new Map();
+function adsRefreshAvisa(conv) {
+  const r = adsRefresh.get(conv);
+  if (!r) return false;
+  if (Date.now() - r.ts > PENDENTE_TTL || r.avisos >= ADS_REFRESH_MAX_AVISOS) {
+    adsRefresh.delete(conv);
+    return false;
+  }
+  r.avisos++;
+  return true;
+}
+function adsRefreshGravou(project, desde) {
+  for (const [conv, r] of adsRefresh) if (r.ts <= desde && (!r.project || r.project === project)) adsRefresh.delete(conv);
+}
 function avisosDoReply(conv, body) {
   try {
     let avisos = pendenteRespondido(conv);
@@ -17390,6 +17407,7 @@ function avisosDoReply(conv, body) {
       formularioMarca(conv, "lembrado");
       avisos += trilhaPEstado(conv) ? "\nLembrete: o formul\xE1rio voltou. Agora a v2 vai pelo deliver (sem novo page_save) e, depois, a ask do gate ('Quer que eu rode o gate nessa p\xE1gina?'); o que o aluno pulou vira 'dado pendente' na p\xE1gina." : "\nLembrete: o formul\xE1rio voltou. Se era o \xFAltimo da trilha de persuas\xE3o, a v2 vai pelo deliver e, depois, a ask do gate ('Quer que eu rode o gate nessa p\xE1gina?'); sem isso a trilha fica sem fim.";
     }
+    if (adsRefreshAvisa(conv)) avisos += ADS_REFRESH_AVISO;
     return avisos;
   } catch {
     return "";
@@ -17960,7 +17978,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const raw = JSON.stringify(scrubbed);
     if (Buffer.byteLength(raw, "utf8") > ADS_MAX) return text("O retrato passou de 8 kB: mande menos campanhas/pe\xE7as ou textos mais curtos.", true);
     try {
+      const antesDeGravar = Date.now();
       const res = await api(`/api/stores/${id}/ads`, { method: "POST", body: { snapshot: scrubbed } });
+      if (res?.ok === true) adsRefreshGravou(id, antesDeGravar);
       const ps = res?.pricing_summary;
       const pricing = ps && typeof ps.text === "string" ? redactKeys(ps.text, 300).text : null;
       const reading = ps && typeof ps.reading === "string" ? ps.reading.slice(0, 20) : null;
@@ -18200,6 +18220,7 @@ async function pullOnce() {
       remember(m.id);
       pendenteEntrou(chatId, m.id, content);
       if (!system && formularioEstado(chatId) === "aberto") formularioMarca(chatId, "voltou");
+      if (!system && ADS_REFRESH_RE.test(content)) adsRefresh.set(chatId, { ts: Date.now(), avisos: 0, project: store?.id ?? null });
       toAck.push(m.id);
       lastStoreId = store && UUID_RE.test(store.id) ? store.id : null;
     }

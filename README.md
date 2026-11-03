@@ -94,6 +94,8 @@ Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair
 
 **Instruções cabem no corte (0.15.0):** o Claude Code só entrega ao Iron os primeiros 4 096 caracteres das instruções de um plugin. O bloco deste canal tem menos de 3 900, e um teste trava isso: regra nova entra só tirando outra. O resto das regras vive na skill `office-fluxos` (dentro do plugin, sem nada pessoal) e nas descrições das ferramentas. Quando o pedido é uma página na lógica de uma referência, o plugin põe uma linha `[iron-office: …]` no começo da mensagem, lembrando o Iron de perguntar antes se pode reaproveitar frases. O `page_save` e o `deliver` devolvem o passo seguinte (formulário ou a pergunta do gate). Lacuna do fornecedor também vira formulário, e o que você pular aparece como "dado pendente" na página. Nada disso sai da sua máquina.
 
+**Botão Atualizar (0.17.1):** depois do pedido `anúncios: atualizar`, o retorno do `reply` lembra de gravar pelo `ads_status`, até gravar; o bloco de instruções não mudou.
+
 **Anúncios por produto (0.17.0):** a ferramenta `ads_by_product` manda as peças medidas pro site, que cruza com as visitas e os pedidos da Shopify e devolve `products`, `outside`, `pending` e `ad_handles`; o Iron copia pro `ads_status` sem recalcular. Id de peça e de campanha não passam pelo filtro de telefone; só o nome da campanha passa. O bloco de instruções não mudou.
 
 **Período dos anúncios (0.16.1):** a descrição do `ads_status` aceita `window_days` 7, 15 ou 30 (a janela que o aluno escolheu na aba Anúncios) e o alerta `recusada_antiga` (recusada em campanha parada e sem gasto, que o site mostra numa linha cinza). O bloco de instruções não mudou.

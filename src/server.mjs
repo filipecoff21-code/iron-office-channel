@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.17.0";
+const VERSION = "0.17.1";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -444,6 +444,27 @@ function pedeEmProsa(body) {
   const ultima = (linhas[linhas.length - 1] ?? "").replace(/[\s)*_"'”’»\p{Extended_Pictographic}\uFE0F]+$/u, "");
   return /\?$/.test(ultima) || PROSA_PEDE_RE.test(body);
 }
+// 0.17.1 (onda 45b.1): o botão Atualizar da aba só sai da espera com um retrato novo (saved_at). O Iron já respondeu "nada mudou"
+// sem gravar: até o ads_status, o reply traz um lembrete. Só o texto exato do botão liga (conversa sobre anúncios não).
+// Gate: no máximo 2 lembretes por clique e 30 min desde o clique, sem renovar: quem não consegue medir diz o motivo e o assunto
+// segue sem lembrete. O ads_status não tem chat_id: limpa o que foi pedido ANTES dele e na mesma loja (o 2º clique sobrevive).
+const ADS_REFRESH_RE = /^\s*anúncios: atualizar(?: · \d+ dias)?\s*$/i;
+const ADS_REFRESH_AVISO = "\nLembrete: pedido do botão Atualizar. A aba só sai da espera com o ads_status, mesmo com números iguais: meça tudo, releia a ficha e grave (com Shopify, ads_by_product antes). Se não deu pra medir, diga o motivo ao aluno e pare.";
+const ADS_REFRESH_MAX_AVISOS = 2;
+const adsRefresh = new Map(); // chat_id → { ts, avisos, project }
+function adsRefreshAvisa(conv) {
+  const r = adsRefresh.get(conv);
+  if (!r) return false;
+  if (Date.now() - r.ts > PENDENTE_TTL || r.avisos >= ADS_REFRESH_MAX_AVISOS) {
+    adsRefresh.delete(conv);
+    return false;
+  }
+  r.avisos++;
+  return true;
+}
+function adsRefreshGravou(project, desde) {
+  for (const [conv, r] of adsRefresh) if (r.ts <= desde && (!r.project || r.project === project)) adsRefresh.delete(conv);
+}
 function avisosDoReply(conv, body) {
   // nunca derruba o reply: a mensagem já saiu, e um erro aqui faria o Iron reenviar
   try {
@@ -457,6 +478,7 @@ function avisosDoReply(conv, body) {
         ? "\nLembrete: o formulário voltou. Agora a v2 vai pelo deliver (sem novo page_save) e, depois, a ask do gate ('Quer que eu rode o gate nessa página?'); o que o aluno pulou vira 'dado pendente' na página."
         : "\nLembrete: o formulário voltou. Se era o último da trilha de persuasão, a v2 vai pelo deliver e, depois, a ask do gate ('Quer que eu rode o gate nessa página?'); sem isso a trilha fica sem fim.";
     }
+    if (adsRefreshAvisa(conv)) avisos += ADS_REFRESH_AVISO;
     return avisos;
   } catch {
     return "";
@@ -1076,7 +1098,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const raw = JSON.stringify(scrubbed);
     if (Buffer.byteLength(raw, "utf8") > ADS_MAX) return text("O retrato passou de 8 kB: mande menos campanhas/peças ou textos mais curtos.", true);
     try {
+      const antesDeGravar = Date.now();
       const res = await api(`/api/stores/${id}/ads`, { method: "POST", body: { snapshot: scrubbed } });
+      if (res?.ok === true) adsRefreshGravou(id, antesDeGravar);
       // 0.9.2: o site devolve o resumo da precificação; vai pro Iron só a frase e a leitura (texto do próprio site)
       const ps = res?.pricing_summary;
       const pricing = ps && typeof ps.text === "string" ? redactKeys(ps.text, 300).text : null;
@@ -1341,6 +1365,7 @@ async function pullOnce() {
       // 0.14.2: entra na fila do lote (aluno e sistema); a resposta de formulário aberto marca "voltou"
       pendenteEntrou(chatId, m.id, content);
       if (!system && formularioEstado(chatId) === "aberto") formularioMarca(chatId, "voltou");
+      if (!system && ADS_REFRESH_RE.test(content)) adsRefresh.set(chatId, { ts: Date.now(), avisos: 0, project: store?.id ?? null });
       toAck.push(m.id);
       lastStoreId = store && UUID_RE.test(store.id) ? store.id : null;
     }
