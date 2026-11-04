@@ -16947,16 +16947,38 @@ var StdioServerTransport = class {
 };
 
 // src/server.mjs
-import { readFileSync as readFileSync2, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync as readFileSync3, writeFileSync, mkdirSync, unlinkSync, existsSync as existsSync2 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { execFile, spawn } from "node:child_process";
-import { dirname, join as join2 } from "node:path";
+import { dirname, join as join3 } from "node:path";
+
+// src/primeira.mjs
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+var SOBRE_MIM = "00 Sobre mim.md";
+function estadoPrimeira(cwd) {
+  try {
+    if (!existsSync(join(cwd, "CLAUDE.md"))) return "nada";
+    const projetos = readdirSync(join(cwd, "Projetos"));
+    const sobre = join(cwd, SOBRE_MIM);
+    if (existsSync(sobre)) {
+      const cabecalho = /^\uFEFF?\s*---[ \t]*\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(sobre, "utf8"));
+      return cabecalho && /^entrevista:\s*["']?em_andamento["']?\s*$/m.test(cabecalho[1]) ? "andamento" : "ler";
+    }
+    if (projetos.some((n) => !n.startsWith("."))) return "nada";
+    return existsSync(join(cwd, "memoria", "historico.md")) ? "nada" : "novo";
+  } catch {
+    return "nada";
+  }
+}
+
+// src/server.mjs
 import { fileURLToPath } from "node:url";
 
 // hooks/shared.mjs
-import { readFileSync } from "node:fs";
+import { readFileSync as readFileSync2 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join as join2 } from "node:path";
 var SECRET_PATTERNS = [
   /iok_[A-Za-z0-9]+/g,
   // chave do próprio Iron Office
@@ -17021,7 +17043,7 @@ function redactKeys(s, max) {
 function feedOn(home = homedir()) {
   let txt;
   try {
-    txt = readFileSync(join(home, ".iron", "config.yaml"), "utf8").replace(/^\uFEFF/, "");
+    txt = readFileSync2(join2(home, ".iron", "config.yaml"), "utf8").replace(/^\uFEFF/, "");
   } catch {
     return true;
   }
@@ -17031,12 +17053,12 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.17.1";
+var VERSION = "0.18.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
-var KEY_PATH = join2(homedir2(), ".claude", "iron-office-api-key");
-var LOCK_DIR = join2(homedir2(), ".iron");
-var LOCK_PATH = join2(LOCK_DIR, "office.lock");
+var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
+var LOCK_DIR = join3(homedir2(), ".iron");
+var LOCK_PATH = join3(LOCK_DIR, "office.lock");
 var DEFAULT_CONVERSATION = "00000000-0000-0000-0000-000000000001";
 var FAST_MS = 2e3;
 var SLOW_MS = 15e3;
@@ -17050,7 +17072,7 @@ function log(msg) {
 }
 function readKey() {
   try {
-    const buf = readFileSync2(KEY_PATH);
+    const buf = readFileSync3(KEY_PATH);
     const utf16 = buf.length >= 2 && buf[0] === 255 && buf[1] === 254;
     return buf.toString(utf16 ? "utf16le" : "utf8").replace(/[﻿\u0000]/g, "").trim();
   } catch {
@@ -17139,7 +17161,7 @@ async function acquireLock() {
     }
     const readHolder = () => {
       try {
-        return parseInt(readFileSync2(LOCK_PATH, "utf8").trim(), 10);
+        return parseInt(readFileSync3(LOCK_PATH, "utf8").trim(), 10);
       } catch {
         return NaN;
       }
@@ -17160,7 +17182,7 @@ async function acquireLock() {
 }
 function releaseLock() {
   try {
-    if (readFileSync2(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync(LOCK_PATH);
+    if (readFileSync3(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync(LOCK_PATH);
   } catch {
   }
 }
@@ -17339,6 +17361,17 @@ Aten\xE7\xE3o: ainda sem resposta nesta conversa: "${p.trecho}" (message_id ${p.
   return linhas.join("") + "\nCada mensagem do aluno tem o seu pr\xF3prio reply/ask.";
 }
 var TRILHA_P_RE = /quero vender como|vender como (?:esta|essa|aquela) p[áa]gina|no estilo d[aeo]|l[óo]gica dess[ae] p[áa]gina|copia a l[óo]gica|no molde d[aeo]/i;
+var ENTREVISTA_DICA = "[primeira conversa: carregue a skill entrevista antes de responder]\n";
+var ENTREVISTA_DEPOIS = "[primeira conversa: atenda este pedido; no fim, carregue a skill entrevista e ofere\xE7a uma vez]\n";
+var SOBRE_DICA = "[sobre o aluno: leia 00 Sobre mim.md antes de responder]\n";
+var PEDIDO_DIRETO_RE = /^\s*(?:trilha:|continuar a trilha|anúncios:|usa o |começar com a loja|ficha da loja)/i;
+var primeiraFeita = false;
+function linhaPrimeira(content) {
+  const estado = estadoPrimeira(process.cwd());
+  if (estado === "ler") return SOBRE_DICA;
+  if (estado !== "novo" && estado !== "andamento") return "";
+  return PEDIDO_DIRETO_RE.test(content) || pedidoTrilhaP(content) ? ENTREVISTA_DEPOIS : ENTREVISTA_DICA;
+}
 var TRILHA_P_DICA = "[iron-office: p\xE1gina na l\xF3gica de uma refer\xEAncia \u2192 carregue a skill office-fluxos; a 1\xAA resposta \xE9 a ask 'Quer que eu reaproveite frases da p\xE1gina de refer\xEAncia?']\n";
 var trilhaP = /* @__PURE__ */ new Map();
 function trilhaPEstado(chatId) {
@@ -18210,7 +18243,9 @@ async function pullOnce() {
     const chatId = typeof m.conversation_id === "string" && m.conversation_id ? m.conversation_id : DEFAULT_CONVERSATION;
     const dica = !system && pedidoTrilhaP(content) ? TRILHA_P_DICA : "";
     if (dica && !trilhaPEstado(chatId)) trilhaP.set(chatId, { estado: "pedido", ts: Date.now() });
-    const ok = await notify(system ? content : `${dica}${storePrefix(store)}${content}`, {
+    const contaPrimeira = !system && !primeiraFeita && !(m.meta && typeof m.meta === "object" && m.meta.answer);
+    const primeira = contaPrimeira ? linhaPrimeira(content) : "";
+    const ok = await notify(system ? content : `${dica}${primeira}${storePrefix(store)}${content}`, {
       chat_id: chatId,
       message_id: m.id,
       user: system ? "sistema" : "aluno",
@@ -18218,6 +18253,7 @@ async function pullOnce() {
     });
     if (ok) {
       remember(m.id);
+      if (contaPrimeira) primeiraFeita = true;
       pendenteEntrou(chatId, m.id, content);
       if (!system && formularioEstado(chatId) === "aberto") formularioMarca(chatId, "voltou");
       if (!system && ADS_REFRESH_RE.test(content)) adsRefresh.set(chatId, { ts: Date.now(), avisos: 0, project: store?.id ?? null });
@@ -18284,7 +18320,7 @@ function strList(v) {
 function readJson(path) {
   let text2;
   try {
-    text2 = readFileSync2(path, "utf8");
+    text2 = readFileSync3(path, "utf8");
   } catch {
     return null;
   }
@@ -18295,13 +18331,13 @@ function readJson(path) {
   }
 }
 function mcpServerNames(home = homedir2(), cwd = process.cwd()) {
-  const user = readJson(join2(home, ".claude.json"));
+  const user = readJson(join3(home, ".claude.json"));
   if (user === void 0) return null;
   const proj = user?.projects && typeof user.projects === "object" ? user.projects[cwd] : null;
   const p = proj && typeof proj === "object" ? proj : {};
   const offJson = new Set(strList(p.disabledMcpjsonServers));
   const onJson = new Set(strList(p.enabledMcpjsonServers));
-  const mcpJson = readJson(join2(cwd, ".mcp.json"));
+  const mcpJson = readJson(join3(cwd, ".mcp.json"));
   if (mcpJson === void 0) return null;
   const fromJson = mcpKeys(mcpJson).filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
   const off = new Set(strList(p.disabledMcpServers));
@@ -18364,12 +18400,12 @@ async function maybeStart() {
   }, RETAKE_MS);
   retake.unref();
 }
-var BYE_SCRIPT = join2(dirname(fileURLToPath(import.meta.url)), "bye.mjs");
+var BYE_SCRIPT = join3(dirname(fileURLToPath(import.meta.url)), "bye.mjs");
 async function byeOnce() {
   if (mode !== "active" || !API_KEY) return;
   if (presenceTimer) clearInterval(presenceTimer);
   const waitMs = presenceInFlight ? 400 : 0;
-  if (existsSync(BYE_SCRIPT)) {
+  if (existsSync2(BYE_SCRIPT)) {
     try {
       const child = spawn(process.execPath, [BYE_SCRIPT, BASE, SESSION_ID, String(waitMs)], { detached: true, stdio: "ignore", windowsHide: true });
       child.on("error", (e) => log(`despedida n\xE3o saiu: ${e.message}`));

@@ -10,10 +10,11 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "
 import { homedir } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
+import { estadoPrimeira } from "./primeira.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.17.1";
+const VERSION = "0.18.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -396,6 +397,20 @@ function pendenteRespondido(chatId) {
 // 0.15.0 (31b rev4): pedido de página na lógica de uma referência. A dica vai na 1ª linha da mensagem injetada (só o
 // plugin escreve ali; o texto do aluno vem depois) e o reply avisa enquanto a ask "reaproveitar frases?" não saiu.
 const TRILHA_P_RE = /quero vender como|vender como (?:esta|essa|aquela) p[áa]gina|no estilo d[aeo]|l[óo]gica dess[ae] p[áa]gina|copia a l[óo]gica|no molde d[aeo]/i;
+// 0.18.0 (onda 49): a primeira conversa vira entrevista opcional. A linha vai na mensagem (molde da trilha P): o bloco de
+// instruções não tem espaço. Uma vez por sessão, na 1ª mensagem do aluno que não seja resposta de botão.
+const ENTREVISTA_DICA = "[primeira conversa: carregue a skill entrevista antes de responder]\n";
+const ENTREVISTA_DEPOIS = "[primeira conversa: atenda este pedido; no fim, carregue a skill entrevista e ofereça uma vez]\n";
+const SOBRE_DICA = "[sobre o aluno: leia 00 Sobre mim.md antes de responder]\n";
+const PEDIDO_DIRETO_RE = /^\s*(?:trilha:|continuar a trilha|anúncios:|usa o |começar com a loja|ficha da loja)/i;
+let primeiraFeita = false;
+function linhaPrimeira(content) {
+  const estado = estadoPrimeira(process.cwd());
+  if (estado === "ler") return SOBRE_DICA;
+  if (estado !== "novo" && estado !== "andamento") return "";
+  return PEDIDO_DIRETO_RE.test(content) || pedidoTrilhaP(content) ? ENTREVISTA_DEPOIS : ENTREVISTA_DICA;
+}
+
 const TRILHA_P_DICA = "[iron-office: página na lógica de uma referência → carregue a skill office-fluxos; a 1ª resposta é a ask 'Quer que eu reaproveite frases da página de referência?']\n";
 const trilhaP = new Map(); // chat_id → { estado: "pedido" | "perguntou", ts }
 function trilhaPEstado(chatId) {
@@ -1354,7 +1369,10 @@ async function pullOnce() {
     const dica = !system && pedidoTrilhaP(content) ? TRILHA_P_DICA : "";
     // a trilha já viva não volta pra "pedido" (a resposta do aluno pode citar a página de novo)
     if (dica && !trilhaPEstado(chatId)) trilhaP.set(chatId, { estado: "pedido", ts: Date.now() });
-    const ok = await notify(system ? content : `${dica}${storePrefix(store)}${content}`, {
+    // resposta de botão (meta.answer) não conta como 1ª mensagem: a conversa ainda não abriu
+    const contaPrimeira = !system && !primeiraFeita && !(m.meta && typeof m.meta === "object" && m.meta.answer);
+    const primeira = contaPrimeira ? linhaPrimeira(content) : "";
+    const ok = await notify(system ? content : `${dica}${primeira}${storePrefix(store)}${content}`, {
       chat_id: chatId,
       message_id: m.id,
       user: system ? "sistema" : "aluno",
@@ -1362,6 +1380,7 @@ async function pullOnce() {
     });
     if (ok) {
       remember(m.id);
+      if (contaPrimeira) primeiraFeita = true;
       // 0.14.2: entra na fila do lote (aluno e sistema); a resposta de formulário aberto marca "voltou"
       pendenteEntrou(chatId, m.id, content);
       if (!system && formularioEstado(chatId) === "aberto") formularioMarca(chatId, "voltou");

@@ -8,6 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { estadoPrimeira } from "../src/primeira.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = join(ROOT, "dist", "server.mjs");
@@ -1660,7 +1661,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
   check("45a ads_status: descrição com 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → versão atual", init?.serverInfo?.version === "0.17.1", JSON.stringify(init?.serverInfo));
+  check("45a initialize → versão atual", init?.serverInfo?.version === "0.18.0", JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1708,7 +1709,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ads = tools.find((t) => t.name === "ads_status");
   check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
   check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
-  check("45b initialize → versão atual", init?.serverInfo?.version === "0.17.1", JSON.stringify(init?.serverInfo));
+  check("45b initialize → versão atual", init?.serverInfo?.version === "0.18.0", JSON.stringify(init?.serverInfo));
   call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
   call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
   call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
@@ -1855,6 +1856,120 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("45b.1 bloco: igual ao da v0.17.0, 3881 caracteres", !!antigos && novos.length === antigos.length && novos.every((l, i) => l === antigos[i]) && ins.length === 3881, `tamanho ${ins.length}`);
   s.p.kill();
   f.srv.close();
+}
+
+// ─── 25. onda 49 (0.18.0): primeira conversa vira entrevista opcional ───
+{
+  console.log("onda 49 (0.18.0)");
+  const base = () => {
+    const d = mkdtempSync(join(tmpdir(), "iron-cofre-"));
+    lixo.push(d);
+    mkdirSync(join(d, "Projetos"));
+    writeFileSync(join(d, "CLAUDE.md"), "regras");
+    writeFileSync(join(d, "Projetos", ".gitkeep"), "");
+    return d;
+  };
+  const sobre = (d, txt) => writeFileSync(join(d, "00 Sobre mim.md"), txt);
+  let d = base();
+  check("49 estado: cofre novo (só .gitkeep em Projetos) = novo", estadoPrimeira(d) === "novo");
+  sobre(d, "---\ntipo: perfil\nentrevista: em_andamento\n---\n# Sobre mim");
+  check("49 estado: em_andamento = andamento", estadoPrimeira(d) === "andamento");
+  sobre(d, "---\r\nentrevista: em_andamento\r\n---\r\n");
+  check("49 estado: em_andamento com CRLF (Windows) = andamento", estadoPrimeira(d) === "andamento");
+  sobre(d, "\uFEFF---\nentrevista: em_andamento\n---\n");
+  check("49 estado: BOM do Bloco de Notas não muda o estado", estadoPrimeira(d) === "andamento");
+  sobre(d, "\n---\nentrevista: \"em_andamento\"\n---\n");
+  check("49 estado: linha em branco e aspas não mudam o estado", estadoPrimeira(d) === "andamento");
+  sobre(d, "\uFEFF---\nentrevista: feita\n---\n");
+  check("49 estado: BOM com feita = ler", estadoPrimeira(d) === "ler");
+  sobre(d, "---\nentrevista: pulada\n---\n");
+  check("49 estado: pulada = ler", estadoPrimeira(d) === "ler");
+  sobre(d, "---\nentrevista: feita\n---\nentrevista: em_andamento no meio do texto");
+  check("49 estado: feita, com a frase só no corpo = ler", estadoPrimeira(d) === "ler");
+  sobre(d, "entrevista: em_andamento\nsem cabeçalho");
+  check("49 estado: sem cabeçalho = ler", estadoPrimeira(d) === "ler");
+  d = base();
+  mkdirSync(join(d, "Projetos", "Loja"));
+  check("49 estado: cofre já em uso, com projeto = nada", estadoPrimeira(d) === "nada");
+  d = base();
+  mkdirSync(join(d, "memoria"));
+  writeFileSync(join(d, "memoria", "historico.md"), "x");
+  check("49 estado: cofre já em uso, com diário = nada", estadoPrimeira(d) === "nada");
+  d = base();
+  rmSync(join(d, "CLAUDE.md"));
+  check("49 estado: sem CLAUDE.md = nada", estadoPrimeira(d) === "nada");
+  d = base();
+  rmSync(join(d, "Projetos"), { recursive: true });
+  check("49 estado: sem Projetos/ (pasta pessoal com CLAUDE.md) = nada, mesmo com o perfil", (sobre(d, "x"), estadoPrimeira(d) === "nada"));
+  check("49 estado: pasta inexistente não lança", estadoPrimeira(join(d, "nao-existe")) === "nada");
+  d = base();
+  mkdirSync(join(d, "00 Sobre mim.md"));
+  check("49 estado: pasta no lugar do arquivo não lança", estadoPrimeira(d) === "nada");
+
+  // a linha na mensagem
+  const fila = [];
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: fila.splice(0, fila.length) } };
+  });
+  const loja = { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Loja" };
+  const msg = (id, content, meta = {}, store = null) => ({ id, conversation_id: "c1", content, meta, created_at: "2026-11-04T18:00:00Z", store });
+  const notifs_ = (s) => s.out.filter((o) => o.msg.method === "notifications/claude/channel");
+  const texto = (s, id) => notifs_(s).find((n) => n.msg.params.meta?.message_id === id)?.msg.params.content ?? "";
+  const sessao = async (cwd) => {
+    const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" }, cwd);
+    s.handshake();
+    await sleep(1500);
+    return s;
+  };
+  const manda = async (...ms) => {
+    fila.push(...ms);
+    await sleep(2500);
+  };
+
+  let s = await sessao(base());
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
+  check("49 initialize → 0.18.0, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.18.0" && (init?.instructions ?? "").length === 3881, String((init?.instructions ?? "").length));
+  await manda(msg("e0", "Sim", { answer: { question_id: "q", option_id: "a" } }));
+  await manda(msg("e1", "ação feita", { system: "action" }));
+  check("49 linha: resposta de botão não leva e não gasta a vez", !texto(s, "e0").includes("[primeira conversa"), texto(s, "e0"));
+  check("49 linha: mensagem do sistema não leva e não gasta a vez", !texto(s, "e1").includes("[primeira conversa"), texto(s, "e1"));
+  await manda(msg("e2", "oi iron", {}, loja));
+  check("49 linha: 1ª mensagem no cofre novo carrega a skill, antes do [loja: …]", texto(s, "e2").startsWith("[primeira conversa: carregue a skill entrevista antes de responder]\n[loja:"), texto(s, "e2"));
+  await manda(msg("e3", "tudo bem?"));
+  check("49 linha: uma vez por sessão", texto(s, "e3") === "tudo bem?", texto(s, "e3"));
+  s.p.kill();
+
+  for (const [id, pedido] of [["d1", "trilha: montar a página"], ["d2", "CONTINUAR A TRILHA"], ["d3", "anúncios: atualizar"], ["d4", "usa o iron-copy: faz uma copy"], ["d5", "começar com a loja"], ["d6", "ficha da loja"]]) {
+    s = await sessao(base());
+    await manda(msg(id, pedido));
+    check(`49 linha: pedido direto "${pedido}" é atendido antes`, texto(s, id).startsWith("[primeira conversa: atenda este pedido"), texto(s, id));
+    s.p.kill();
+  }
+  s = await sessao(base());
+  await manda(msg("t1", "quero vender como esta página: https://exemplo.com/p"));
+  check("49 linha: trilha P na 1ª mensagem: dica da trilha, depois a linha da entrevista", texto(s, "t1").startsWith("[iron-office: página na lógica") && texto(s, "t1").includes("\n[primeira conversa: atenda este pedido"), texto(s, "t1"));
+  s.p.kill();
+  d = base();
+  sobre(d, "---\nentrevista: em_andamento\n---\n");
+  s = await sessao(d);
+  await manda(msg("a1", "oi"));
+  check("49 linha: em andamento retoma pela skill", texto(s, "a1").startsWith("[primeira conversa: carregue"), texto(s, "a1"));
+  s.p.kill();
+  d = base();
+  sobre(d, "---\nentrevista: feita\n---\n");
+  s = await sessao(d);
+  await manda(msg("l1", "oi"), msg("l2", "e aí"));
+  check("49 linha: já respondeu = manda ler o arquivo, uma vez", texto(s, "l1").startsWith("[sobre o aluno: leia 00 Sobre mim.md") && texto(s, "l2") === "e aí", texto(s, "l1") + " | " + texto(s, "l2"));
+  s.p.kill();
+  d = base();
+  mkdirSync(join(d, "Projetos", "Loja"));
+  s = await sessao(d);
+  await manda(msg("n1", "oi"));
+  check("49 linha: cofre em uso sem perfil não ganha linha nem entrevista", texto(s, "n1") === "oi", texto(s, "n1"));
+  s.p.kill();
+  f.srv.close();
+  const skill = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "skills", "entrevista", "SKILL.md"), "utf8");
+  check("49 skill: entrevista existe, sem Bash e sem ir pro site", /^name: entrevista$/m.test(skill) && /Nunca por Bash/.test(skill) && /sem `deliver`, `store_update` nem `trail_update`/.test(skill) && /entrevista: em_andamento/.test(skill));
 }
 
 for (const d of lixo) {
