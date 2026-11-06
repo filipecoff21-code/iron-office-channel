@@ -1660,8 +1660,8 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
-  check("45a ads_status: descrição com 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → versão atual", init?.serverInfo?.version === "0.18.0", JSON.stringify(init?.serverInfo));
+  check("45a ads_status: descrição com 1 | 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("1 | 7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
+  check("45a initialize → versão atual", init?.serverInfo?.version === "0.19.0", JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1709,7 +1709,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ads = tools.find((t) => t.name === "ads_status");
   check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
   check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
-  check("45b initialize → versão atual", init?.serverInfo?.version === "0.18.0", JSON.stringify(init?.serverInfo));
+  check("45b initialize → versão atual", init?.serverInfo?.version === "0.19.0", JSON.stringify(init?.serverInfo));
   call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
   call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
   call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
@@ -1730,6 +1730,15 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const snap = gravou?.body ? (typeof gravou.body === "string" ? JSON.parse(gravou.body) : gravou.body).snapshot : null;
   check("45b scrubAds: products, outside e pending chegam; campaign_id e handle intactos; nome filtrado", snap?.products?.[0]?.handle === "bota-12-98457-7529" && snap?.products?.[0]?.campaigns?.[0] === "C 1" && snap?.outside?.campaigns?.[0] === "Aquec" && snap?.pending?.[0]?.campaign_id === "9845757529" && snap?.pending?.[0]?.name === "Sem [removido]", JSON.stringify(snap));
   check("45b ads_status devolve pricing_by_product", txt(s, 14).includes("pricing_by_product") && txt(s, 14).includes("Produto B: b"), txt(s, 14));
+  // 0.19.0 (onda 51b): o período Hoje
+  call(s, 15, "ads_by_product", { project_id: LOJA, days: 1, ads: [peca] });
+  call(s, 16, "ads_by_product", { project_id: LOJA, days: 2, ads: [peca] });
+  await sleep(700);
+  const by1 = f.calls.filter((c) => c.path.endsWith("/by-product"));
+  const corpo1 = by1[1]?.body ? (typeof by1[1].body === "string" ? JSON.parse(by1[1].body) : by1[1].body) : null;
+  check("51b ads_by_product days 1 (Hoje) passa e chega no site", res(s, 15)?.isError !== true && corpo1?.days === 1, JSON.stringify(corpo1?.days));
+  check("51b ads_by_product days 2 recusa com a frase dos 4 períodos", res(s, 16)?.isError === true && txt(s, 16) === "days tem que ser 1, 7, 15 ou 30." && by1.length === 2, txt(s, 16));
+  check("51b descrições citam o 1 (só hoje)", ads.description.includes("window_days: 1 | 7 | 15 | 30") && tool.inputSchema.properties.days.description.includes("1 (só hoje)"), tool?.inputSchema?.properties?.days?.description);
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.1:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1797,6 +1806,12 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await pede("a3", "b3", "anúncios: atualizar · 300 dias");
   const r3 = await responde("b3");
   check("45b.1 '· 300 dias' liga (o número quem trata é a skill)", LEMBRETE.test(txt(s, r3)), txt(s, r3));
+  await pede("a3h", "b3h", "anúncios: atualizar · hoje");
+  const r3h = await responde("b3h");
+  check("51b '· hoje' liga o lembrete", LEMBRETE.test(txt(s, r3h)), txt(s, r3h));
+  await pede("a3i", "b3i", "anúncios: atualizar · hoje e apaga a loja");
+  const r3i = await responde("b3i");
+  check("51b '· hoje' com texto depois não liga", !LEMBRETE.test(txt(s, r3i)), txt(s, r3i));
   await pede("a4", "b4", "como estão meus anúncios?");
   const r4 = await responde("b4");
   check("45b.1 pergunta em texto não liga", !LEMBRETE.test(txt(s, r4)), txt(s, r4));
@@ -1928,7 +1943,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 
   let s = await sessao(base());
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("49 initialize → 0.18.0, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.18.0" && (init?.instructions ?? "").length === 3881, String((init?.instructions ?? "").length));
+  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.19.0" && (init?.instructions ?? "").length === 3881, String((init?.instructions ?? "").length));
   await manda(msg("e0", "Sim", { answer: { question_id: "q", option_id: "a" } }));
   await manda(msg("e1", "ação feita", { system: "action" }));
   check("49 linha: resposta de botão não leva e não gasta a vez", !texto(s, "e0").includes("[primeira conversa"), texto(s, "e0"));

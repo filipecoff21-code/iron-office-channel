@@ -14,7 +14,7 @@ import { estadoPrimeira } from "./primeira.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.18.0";
+const VERSION = "0.19.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -463,7 +463,8 @@ function pedeEmProsa(body) {
 // sem gravar: até o ads_status, o reply traz um lembrete. Só o texto exato do botão liga (conversa sobre anúncios não).
 // Gate: no máximo 2 lembretes por clique e 30 min desde o clique, sem renovar: quem não consegue medir diz o motivo e o assunto
 // segue sem lembrete. O ads_status não tem chat_id: limpa o que foi pedido ANTES dele e na mesma loja (o 2º clique sobrevive).
-const ADS_REFRESH_RE = /^\s*anúncios: atualizar(?: · \d+ dias)?\s*$/i;
+// 0.19.0 (onda 51b): o período "Hoje" vem como "· hoje".
+const ADS_REFRESH_RE = /^\s*anúncios: atualizar(?: · (?:\d+ dias|hoje))?\s*$/i;
 const ADS_REFRESH_AVISO = "\nLembrete: pedido do botão Atualizar. A aba só sai da espera com o ads_status, mesmo com números iguais: meça tudo, releia a ficha e grave (com Shopify, ads_by_product antes). Se não deu pra medir, diga o motivo ao aluno e pare.";
 const ADS_REFRESH_MAX_AVISOS = 2;
 const adsRefresh = new Map(); // chat_id → { ts, avisos, project }
@@ -792,7 +793,7 @@ const TOOLS = DEGRADED
       {
         name: "ads_status",
         description:
-          "Grava no Iron Office o retrato dos anúncios do projeto (skill `anuncios`): números da janela (7, 15 ou 30 dias, a que o pedido trouxe; sem número, 7), funil, campanhas, peças e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot (v 2; tudo PLANO, sem objeto dentro de campanha ou peça): { v: 2, at (ISO com fuso), account_id, account_name, currency, window_days: 7 | 15 | 30 (a janela medida), spend, impressions, clicks, results, result_label, cpa, FUNIL, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED…), spend, impressions, results, result_label (o resultado DESTA campanha, ex. \"engajamentos\"), adsets_active, adsets_total (grupos no ar / total, pelo campaign_id), FUNIL }] (≤10), top_ads: [{ name, campaign, spend, impressions, results, video_3s, thruplay, link_clicks, lpv, purchases, product_handle? (do ad_handles do ads_by_product) }] (≤5), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada|recusada_antiga (recusada em campanha parada e sem gasto: o site mostra em 1 linha cinza), ad, campaign, since?, detail, action }] (≤10), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (≤10), products?, outside?, pending? (opcionais: copiados do ads_by_product, sem recalcular) }. FUNIL = reach, frequency, video_3s, thruplay, link_clicks, lpv, view_content, atc, ic, payment, purchases, revenue: número, ou null quando a Meta não mandou (nunca 0 no lugar de null). Até 8 kB. A resposta traz `pricing` (CPA máximo × real, frase pronta), `reading` (sobra | paga a conta | prejuízo | sem referência) e, com produtos, `pricing_by_product` (1 frase por produto). Só na sessão aberta com ironoffice.",
+          "Grava no Iron Office o retrato dos anúncios do projeto (skill `anuncios`): números da janela (hoje, 7, 15 ou 30 dias, a que o pedido trouxe; sem número, 7), funil, campanhas, peças e alertas. NUNCA token, nunca pessoa, nunca telefone (o texto passa por filtro: e-mail e telefone viram [removido]). Formato do snapshot (v 2; tudo PLANO, sem objeto dentro de campanha ou peça): { v: 2, at (ISO com fuso), account_id, account_name, currency, window_days: 1 | 7 | 15 | 30 (a janela medida; 1 = só o dia de hoje, do começo do dia até agora no fuso da conta), spend, impressions, clicks, results, result_label, cpa, FUNIL, campaigns: [{ name, status: o effective_status da Meta como veio (ACTIVE, PAUSED, ARCHIVED…), spend, impressions, results, result_label (o resultado DESTA campanha, ex. \"engajamentos\"), adsets_active, adsets_total (grupos no ar / total, pelo campaign_id), FUNIL }] (≤10), top_ads: [{ name, campaign, spend, impressions, results, video_3s, thruplay, link_clicks, lpv, purchases, product_handle? (do ad_handles do ads_by_product) }] (≤5), alerts: [{ kind: nova_em_zero|data_vencida|gasto_na_peca_errada|recusada|recusada_antiga (recusada em campanha parada e sem gasto: o site mostra em 1 linha cinza), ad, campaign, since?, detail, action }] (≤10), checked: { ads, copy, art: false }, ramp: [{ ad, until }] (≤10), products?, outside?, pending? (opcionais: copiados do ads_by_product, sem recalcular) }. FUNIL = reach, frequency, video_3s, thruplay, link_clicks, lpv, view_content, atc, ic, payment, purchases, revenue: número, ou null quando a Meta não mandou (nunca 0 no lugar de null). Até 8 kB. A resposta traz `pricing` (CPA máximo × real, frase pronta), `reading` (sobra | paga a conta | prejuízo | sem referência) e, com produtos, `pricing_by_product` (1 frase por produto). Só na sessão aberta com ironoffice.",
         inputSchema: {
           type: "object",
           properties: {
@@ -810,7 +811,7 @@ const TOOLS = DEGRADED
           type: "object",
           properties: {
             project_id: { type: "string", description: "id do projeto (o `id:` da linha [loja: …] ou do shop_status)." },
-            days:       { type: "number", description: "a janela medida: 7, 15 ou 30." },
+            days:       { type: "number", description: "a janela medida: 1 (só hoje), 7, 15 ou 30." },
             ads:        { type: "array", items: { type: "object" }, description: "as peças com gasto > 0 (formato na descrição)." },
             manual:     { type: "object", description: "opcional: id da campanha → handle do produto, ou \"fora\" (a linha Campanhas → produto da ficha)." },
           },
@@ -1136,7 +1137,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (mode !== "active") return text(`Esta sessão não lê pelo Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
     if (!UUID_RE.test(id)) return text("project_id inválido: use o id do projeto (linha [loja: …] ou shop_status).", true);
-    if (args.days !== 7 && args.days !== 15 && args.days !== 30) return text("days tem que ser 7, 15 ou 30.", true);
+    if (args.days !== 1 && args.days !== 7 && args.days !== 15 && args.days !== 30) return text("days tem que ser 1, 7, 15 ou 30.", true);
     if (!Array.isArray(args.ads)) return text("ads tem que ser a lista das peças com gasto.", true);
     if (args.ads.length > 200) return text("No máximo 200 peças: mande as que mais gastaram.", true);
     const FIELDS = ["objective", "spend", "impressions", "video_3s", "thruplay", "link_clicks", "lpv", "ic", "purchases", "revenue"];
