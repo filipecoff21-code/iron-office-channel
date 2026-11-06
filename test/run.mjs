@@ -229,6 +229,33 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   f.srv.close();
 }
 
+// ─── 6b. onda 52: aviso no terminal de quem fica em espera e de quem assume ───
+{
+  console.log("lock · avisos (0.20.0)");
+  const home = casa();
+  const f = await fakeOffice((c) => (c.path === "/api/chat/pull" ? { json: { dashboard_open: true, messages: [] } } : {}));
+  const a = startServer(home, f.url, { IRON_OFFICE_CHANNEL: "1" });
+  a.handshake();
+  await sleep(1500);
+  check("52: partida sem trava fica ativa e não recebe aviso nenhum", /ativo em/.test(a.stderr()) && notifs(a.out).length === 0, JSON.stringify(notifs(a.out)));
+  const b = startServer(home, f.url, { IRON_OFFICE_CHANNEL: "1", IRON_OFFICE_RETAKE_MS: "400" });
+  b.handshake();
+  await sleep(1500); // ~3 tentativas de reassumir com a trava viva do outro
+  const espera = notifs(b.out).filter((o) => /outro Iron já está aberto neste computador/.test(o.msg.params.content));
+  check("52: trava viva de outro processo: 1 aviso de espera, e só 1 em 3 tentativas", notifs(b.out).length === 1 && espera.length === 1, JSON.stringify(notifs(b.out).map((o) => o.msg.params.content)));
+  check("52: o aviso é do sistema (chat_id e user system), com o gesto de fechar o outro",
+    espera[0]?.msg.params.meta.chat_id === "system" && espera[0]?.msg.params.meta.user === "system" && /Ctrl\+C duas vezes na janela dele/.test(espera[0]?.msg.params.content ?? ""),
+    JSON.stringify(espera[0]?.msg.params));
+  const presAntes = f.calls.filter((c) => c.path === "/api/chat/presence").length;
+  a.p.kill("SIGTERM");
+  await sleep(2500);
+  const assumiu = notifs(b.out).filter((o) => /o outro Iron fechou\. Este assumiu/.test(o.msg.params.content));
+  check("52: trava liberada: aviso de que assumiu, uma vez, e fica ativo", assumiu.length === 1 && /ativo em/.test(b.stderr()) && assumiu[0].msg.params.meta.chat_id === "system", b.stderr().trim());
+  check("52: depois de assumir, marca a presença no site", f.calls.filter((c) => c.path === "/api/chat/presence").length > presAntes, `antes ${presAntes}`);
+  b.p.kill();
+  f.srv.close();
+}
+
 // ─── 7. hook não vaza segredo ───────────────────────────────────────────
 {
   console.log("hook");
@@ -1661,7 +1688,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
   check("45a ads_status: descrição com 1 | 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("1 | 7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → versão atual", init?.serverInfo?.version === "0.19.0", JSON.stringify(init?.serverInfo));
+  check("45a initialize → versão atual", init?.serverInfo?.version === "0.20.0", JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1709,7 +1736,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ads = tools.find((t) => t.name === "ads_status");
   check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
   check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
-  check("45b initialize → versão atual", init?.serverInfo?.version === "0.19.0", JSON.stringify(init?.serverInfo));
+  check("45b initialize → versão atual", init?.serverInfo?.version === "0.20.0", JSON.stringify(init?.serverInfo));
   call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
   call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
   call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
@@ -1943,7 +1970,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 
   let s = await sessao(base());
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.19.0" && (init?.instructions ?? "").length === 3881, String((init?.instructions ?? "").length));
+  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.20.0" && (init?.instructions ?? "").length === 3881, String((init?.instructions ?? "").length));
   await manda(msg("e0", "Sim", { answer: { question_id: "q", option_id: "a" } }));
   await manda(msg("e1", "ação feita", { system: "action" }));
   check("49 linha: resposta de botão não leva e não gasta a vez", !texto(s, "e0").includes("[primeira conversa"), texto(s, "e0"));

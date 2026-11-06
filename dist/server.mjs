@@ -17053,7 +17053,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.19.0";
+var VERSION = "0.20.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
@@ -17065,7 +17065,10 @@ var SLOW_MS = 15e3;
 var MAX_BACKOFF_MS = 6e4;
 var AUTH_PAUSE_MS = 5 * 6e4;
 var PRESENCE_MS = 3e4;
-var RETAKE_MS = 15e3;
+var RETAKE_MS = (() => {
+  const n = Number(process.env.IRON_OFFICE_RETAKE_MS);
+  return Number.isFinite(n) && n >= 200 && n <= 15e3 ? n : 15e3;
+})();
 function log(msg) {
   process.stderr.write(`[iron-office] ${msg}
 `);
@@ -18208,6 +18211,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
   return text(`Ferramenta desconhecida: ${name}`, true);
 });
+function systemMeta() {
+  return { chat_id: "system", message_id: `system-${Date.now()}`, user: "system", ts: (/* @__PURE__ */ new Date()).toISOString() };
+}
 async function notify(content, meta2) {
   try {
     await mcp.notification({ method: "notifications/claude/channel", params: { content, meta: meta2 } });
@@ -18391,10 +18397,21 @@ async function maybeStart() {
   }
   mode = "passive";
   log("outra sess\xE3o j\xE1 \xE9 a ativa: modo passivo (tenta assumir a cada 15 s)");
+  await notify(
+    "Iron Office: outro Iron j\xE1 est\xE1 aberto neste computador. Este fica em espera e o site n\xE3o fala com ele. Pra usar este, feche o outro (Ctrl+C duas vezes na janela dele): este assume em at\xE9 15 segundos.",
+    systemMeta()
+  );
+  let trying = false;
   const retake = setInterval(async () => {
     if (stopped) return clearInterval(retake);
-    if (await acquireLock()) {
+    if (trying) return;
+    trying = true;
+    const got = await acquireLock().finally(() => {
+      trying = false;
+    });
+    if (got) {
       clearInterval(retake);
+      await notify("Iron Office: o outro Iron fechou. Este assumiu: o site agora fala com esta sess\xE3o.", systemMeta());
       becomeActive();
     }
   }, RETAKE_MS);

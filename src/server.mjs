@@ -14,7 +14,7 @@ import { estadoPrimeira } from "./primeira.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.19.0";
+const VERSION = "0.20.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -27,7 +27,11 @@ const SLOW_MS = 15_000;
 const MAX_BACKOFF_MS = 60_000;
 const AUTH_PAUSE_MS = 5 * 60_000;
 const PRESENCE_MS = 30_000;
-const RETAKE_MS = 15_000;
+// 0.20.0: o teste encurta a espera entre as tentativas de reassumir (só número de 200 ms a 15 s; fora disso, 15 s)
+const RETAKE_MS = (() => {
+  const n = Number(process.env.IRON_OFFICE_RETAKE_MS);
+  return Number.isFinite(n) && n >= 200 && n <= 15_000 ? n : 15_000;
+})();
 
 function log(msg) {
   process.stderr.write(`[iron-office] ${msg}\n`);
@@ -1324,6 +1328,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   return text(`Ferramenta desconhecida: ${name}`, true);
 });
 
+// aviso do próprio canal (o bloco de instruções manda repassar no terminal)
+function systemMeta() {
+  return { chat_id: "system", message_id: `system-${Date.now()}`, user: "system", ts: new Date().toISOString() };
+}
+
 // true só se a notificação foi escrita no transporte da sessão
 async function notify(content, meta) {
   try {
@@ -1539,10 +1548,20 @@ async function maybeStart() {
   }
   mode = "passive";
   log("outra sessão já é a ativa: modo passivo (tenta assumir a cada 15 s)");
+  // 0.20.0 (onda 52): o aluno fica sabendo no terminal (antes só ia pro log). Uma vez ao entrar em espera, outra ao assumir.
+  await notify(
+    "Iron Office: outro Iron já está aberto neste computador. Este fica em espera e o site não fala com ele. Pra usar este, feche o outro (Ctrl+C duas vezes na janela dele): este assume em até 15 segundos.",
+    systemMeta(),
+  );
+  let trying = false; // gate 52 r1: tentativa em andamento não abre outra (espera curta no teste sobrepunha)
   const retake = setInterval(async () => {
     if (stopped) return clearInterval(retake);
-    if (await acquireLock()) {
+    if (trying) return;
+    trying = true;
+    const got = await acquireLock().finally(() => { trying = false; });
+    if (got) {
       clearInterval(retake);
+      await notify("Iron Office: o outro Iron fechou. Este assumiu: o site agora fala com esta sessão.", systemMeta());
       becomeActive();
     }
   }, RETAKE_MS);
