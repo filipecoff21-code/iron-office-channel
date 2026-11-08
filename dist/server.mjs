@@ -17053,7 +17053,7 @@ function feedOn(home = homedir()) {
 }
 
 // src/server.mjs
-var VERSION = "0.20.0";
+var VERSION = "0.21.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
@@ -17068,6 +17068,10 @@ var PRESENCE_MS = 3e4;
 var RETAKE_MS = (() => {
   const n = Number(process.env.IRON_OFFICE_RETAKE_MS);
   return Number.isFinite(n) && n >= 200 && n <= 15e3 ? n : 15e3;
+})();
+var WAIT_NOTICE_MS = (() => {
+  const n = Number(process.env.IRON_OFFICE_WAIT_NOTICE_MS);
+  return Number.isFinite(n) && n >= 200 && n <= 15e3 ? n : 1e4;
 })();
 function log(msg) {
   process.stderr.write(`[iron-office] ${msg}
@@ -18397,11 +18401,23 @@ async function maybeStart() {
   }
   mode = "passive";
   log("outra sess\xE3o j\xE1 \xE9 a ativa: modo passivo (tenta assumir a cada 15 s)");
-  await notify(
-    "Iron Office: outro Iron j\xE1 est\xE1 aberto neste computador. Este fica em espera e o site n\xE3o fala com ele. Pra usar este, feche o outro (Ctrl+C duas vezes na janela dele): este assume em at\xE9 15 segundos.",
-    systemMeta()
-  );
   let trying = false;
+  let waitNotice;
+  const fireWaitNotice = () => {
+    if (mode !== "passive" || stopped) return;
+    if (trying) {
+      waitNotice = setTimeout(fireWaitNotice, 200);
+      waitNotice.unref();
+      return;
+    }
+    notify(
+      "Iron Office: outro Iron j\xE1 est\xE1 aberto neste computador. Este fica em espera e o site n\xE3o fala com ele. Pra usar este, feche o outro (Ctrl+C duas vezes na janela dele): este assume em at\xE9 15 segundos.",
+      systemMeta()
+    ).catch(() => {
+    });
+  };
+  waitNotice = setTimeout(fireWaitNotice, WAIT_NOTICE_MS);
+  waitNotice.unref();
   const retake = setInterval(async () => {
     if (stopped) return clearInterval(retake);
     if (trying) return;
@@ -18411,6 +18427,7 @@ async function maybeStart() {
     });
     if (got) {
       clearInterval(retake);
+      clearTimeout(waitNotice);
       await notify("Iron Office: o outro Iron fechou. Este assumiu: o site agora fala com esta sess\xE3o.", systemMeta());
       becomeActive();
     }

@@ -98,7 +98,7 @@ Nos campos acima, padrões conhecidos de segredo são apagados **antes** de sair
 
 **Período Hoje (0.19.0):** o botão "Atualizar agora" da aba Anúncios pode pedir `anúncios: atualizar · hoje`; o lembrete do botão vale pra ele também. `ads_by_product` aceita `days: 1` (só o dia de hoje) e o `ads_status` grava `window_days: 1`. O site guarda o último retrato de cada período. O bloco de instruções não mudou.
 
-**Outro Iron aberto (0.20.0):** a sessão que nasce com outro Iron vivo no computador fica em espera e avisa no terminal (aviso `system`, uma vez); quando o outro fecha, assume e avisa de novo. `IRON_OFFICE_RETAKE_MS` (200 ms a 15 s) só encurta a espera no teste.
+**Outro Iron aberto (0.20.0, atraso na 0.21.0):** a sessão que nasce com outro Iron vivo no computador fica em espera e avisa no terminal (aviso `system`, uma vez, 10 s depois do handshake; se assumir antes, só sai o aviso de que assumiu); quando o outro fecha, assume e avisa de novo. `IRON_OFFICE_RETAKE_MS` e `IRON_OFFICE_WAIT_NOTICE_MS` (200 ms a 15 s) só encurtam as esperas no teste.
 
 **Botão Atualizar (0.17.1):** depois do pedido `anúncios: atualizar`, o retorno do `reply` lembra de gravar pelo `ads_status`, até gravar; o bloco de instruções não mudou.
 

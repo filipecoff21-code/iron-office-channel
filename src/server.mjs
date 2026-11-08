@@ -14,7 +14,7 @@ import { estadoPrimeira } from "./primeira.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn } from "../hooks/shared.mjs";
 
-const VERSION = "0.20.0";
+const VERSION = "0.21.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -31,6 +31,12 @@ const PRESENCE_MS = 30_000;
 const RETAKE_MS = (() => {
   const n = Number(process.env.IRON_OFFICE_RETAKE_MS);
   return Number.isFinite(n) && n >= 200 && n <= 15_000 ? n : 15_000;
+})();
+// 0.21.0 (onda 53): o aviso de espera no instante do initialize não aparecia no terminal (teste do Filipe 06/11); sai 10 s depois.
+// IRON_OFFICE_WAIT_NOTICE_MS só pro teste (mesma régua: 200 ms a 15 s; fora disso, 10 s).
+const WAIT_NOTICE_MS = (() => {
+  const n = Number(process.env.IRON_OFFICE_WAIT_NOTICE_MS);
+  return Number.isFinite(n) && n >= 200 && n <= 15_000 ? n : 10_000;
 })();
 
 function log(msg) {
@@ -1549,11 +1555,20 @@ async function maybeStart() {
   mode = "passive";
   log("outra sessão já é a ativa: modo passivo (tenta assumir a cada 15 s)");
   // 0.20.0 (onda 52): o aluno fica sabendo no terminal (antes só ia pro log). Uma vez ao entrar em espera, outra ao assumir.
-  await notify(
-    "Iron Office: outro Iron já está aberto neste computador. Este fica em espera e o site não fala com ele. Pra usar este, feche o outro (Ctrl+C duas vezes na janela dele): este assume em até 15 segundos.",
-    systemMeta(),
-  );
+  // 0.21.0 (onda 53): o aviso de espera sai WAIT_NOTICE_MS depois; se nesse meio-tempo assumiu (ou fechou), não sai.
   let trying = false; // gate 52 r1: tentativa em andamento não abre outra (espera curta no teste sobrepunha)
+  // tentativa de reassumir em andamento: espera ela terminar (se pegou a trava, o "assumiu" vai sozinho)
+  let waitNotice;
+  const fireWaitNotice = () => {
+    if (mode !== "passive" || stopped) return;
+    if (trying) { waitNotice = setTimeout(fireWaitNotice, 200); waitNotice.unref(); return; }
+    notify(
+      "Iron Office: outro Iron já está aberto neste computador. Este fica em espera e o site não fala com ele. Pra usar este, feche o outro (Ctrl+C duas vezes na janela dele): este assume em até 15 segundos.",
+      systemMeta(),
+    ).catch(() => {});
+  };
+  waitNotice = setTimeout(fireWaitNotice, WAIT_NOTICE_MS);
+  waitNotice.unref();
   const retake = setInterval(async () => {
     if (stopped) return clearInterval(retake);
     if (trying) return;
@@ -1561,6 +1576,7 @@ async function maybeStart() {
     const got = await acquireLock().finally(() => { trying = false; });
     if (got) {
       clearInterval(retake);
+      clearTimeout(waitNotice);
       await notify("Iron Office: o outro Iron fechou. Este assumiu: o site agora fala com esta sessão.", systemMeta());
       becomeActive();
     }
