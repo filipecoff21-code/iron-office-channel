@@ -13,8 +13,8 @@
 //
 // MODELO DE AMEAÇA (R-1): freio pra um Iron cooperativo e pra injeção simples (um README que diz "rode npm i tal"). Barra o
 // comando de instalação em qualquer forma plausível. NÃO promete segurar ofuscação deliberada: comando montado em
-// variáveis, `$'\x6e'`, script gravado e executado depois, binário copiado com outro nome, código Python/Node que instala
-// por dentro. Não vê o que o aluno digita no próprio terminal. Não cobre winget, choco, scoop, apt, cargo, go install, gem
+// variáveis, `$'\x6e'`, script gravado ou baixado num comando e rodado em outro, binário copiado com outro nome, código Python/Node que instala
+// por dentro. Consequência da D-4: o Iron pode editar o package.json e rodar `npm install` seco, e isso instala o que ele pôs lá. Não vê o que o aluno digita no próprio terminal. Não cobre winget, choco, scoop, apt, cargo, go install, gem
 // nem Install-Module. Separador de shell entre aspas no meio dos pacotes (`npm i a ";" b`) parte o trecho: ofuscação, limite.
 // A pasta do porteiro: barra o caminho .iron/porteiro, os nomes liberados.json e porteiro/modo, e .iron + porteiro no mesmo
 // comando ou com a pasta atual dentro de ~/.iron. Montar o caminho em variáveis ou glob (~/.ir?n/p*) é ofuscação: limite.
@@ -113,8 +113,10 @@ const EXECS = new Set(["npx", "pnpx", "bunx", "uvx", "pipx"]);
 const isPip = (t) => /^pip\d*(\.\d+)?$/.test(t) || t === "uv"; // pip, pip3, pip3.11, uv (gate r6)
 const PY_VERBS = new Set(["install", "add", "sync", "run"]);
 const INTERP = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "iex", "invoke-expression", "node", "python", "python3", "pwsh", "powershell", "perl", "ruby"]);
-const FETCH = new Set(["curl", "wget", "iwr", "irm", "invoke-webrequest", "invoke-restmethod", "fetch"]);
-const FETCH_INTERP = new Set(["sh", "bash", "zsh", "source", ".", "iex", "node", "python", "python3"]);
+const FETCH = new Set(["curl", "wget", "iwr", "irm", "invoke-webrequest", "invoke-restmethod", "fetch", "downloadstring", "downloadfile"]);
+// `(New-Object Net.WebClient).DownloadString(…)` normalizado vira a palavra `.downloadstring` (ou `c.downloadstring` com variável)
+const ehFetch = (t) => FETCH.has(t) || /\.download(string|file)$/.test(t);
+const FETCH_INTERP = new Set(["sh", "bash", "zsh", "source", ".", "iex", "invoke-expression", "node", "python", "python3"]);
 const PREFIX = new Set(["sudo", "env", "nohup", "command", "time", "exec", "builtin", "stdbuf", "nice", "timeout", "busybox", "xargs"]);
 // flags cujo valor não é pacote (só pra decidir "da casa" e nomear; nunca pra detectar)
 const VALUE_FLAGS = new Set(["--prefix", "--registry", "--cache", "--tag", "--workspace", "-w", "--loglevel", "--depth", "--filter", "-f", "-c", "--dir", "--cwd", "-r", "--requirement", "-e", "--editable", "-i", "--index-url", "--extra-index-url", "-t", "--target", "--scope", "-s", "--transport", "--env", "-h", "--header", "-b", "--branch", "-o", "--origin", "--otp"]);
@@ -343,7 +345,7 @@ function detectSeg(tok, raw, ctx) {
   }
 
   // baixar e rodar no mesmo trecho: sh <(curl …), source <(curl …), iex (irm …)
-  if (tok.some((t) => FETCH.has(t)) && tok.some((t) => FETCH_INTERP.has(t))) {
+  if (tok.some(ehFetch) && tok.some((t) => FETCH_INTERP.has(t))) {
     const u = tok.find(isUrl);
     hits.push(u ? { item: u, tipo: T.script, casa: false } : semNome(T.script, segN));
   }
@@ -361,6 +363,35 @@ function escreveProtegido(tok) {
   const verbo = tok.some((t, k) => VERBO_ESCRITA.has(t) || (k === 0 && t === "install") || ((t === "sed" || t === "perl") && tok.slice(k + 1).some((x) => x.startsWith("-i"))) || (t === "git" && tok.includes("clone")) || (t === "curl" && tok.some((x) => /^-[a-z]*o$|^--output/.test(x))));
   const redirecionado = tok.flatMap((t, k) => (/^(1|&)?>>?$/.test(t) && PROTEGIDO_RE.test(tok[k + 1] ?? "") ? [tok[k + 1]] : []));
   return verbo ? alvos : redirecionado;
+}
+
+// 54.1: baixar num arquivo e rodar no MESMO comando (`curl -o i.sh … && sh i.sh`), no comando inteiro e por presença. Só
+// conta como "gravou" o destino de verdade (-o /dev/null e -o - não gravam nada), e o destino não conta como "rodou"
+// (`curl -o ./foto.jpg …` sozinho não roda nada; se `./i.sh` aparece em outra posição, conta).
+const SAIDA_CURL = /^-[a-z]*o|^--(?:output|remote-name)/;
+const SAIDA_WGET = /^-[a-z]*o|^--output-document/;
+const NAO_GRAVA = new Set(["-", "/dev/null", "nul", "null"]);
+function baixarERodar(segs) {
+  let gravou = false;
+  const destinos = new Set();
+  segs.forEach((s, i) => {
+    const curl = s.tok.includes("curl"), wget = s.tok.includes("wget");
+    s.tok.forEach((t, k) => {
+      if (!((curl && SAIDA_CURL.test(t)) || (wget && SAIDA_WGET.test(t)) || t === "-outfile")) return;
+      const colado = t.startsWith("--") ? t.split("=")[1] : t === "-outfile" ? "" : t.slice(t.indexOf("o", 1) + 1);
+      const destino = colado || s.tok[k + 1];
+      if (NAO_GRAVA.has(destino)) return;
+      gravou = true;
+      if (!colado) destinos.add(`${i}:${k + 1}`);
+    });
+    if (s.tok.some((t) => /\.downloadfile$/.test(t))) gravou = true;
+  });
+  if (!gravou) return null;
+  const rodou = segs.some((s, i) => s.tok.some((t, k) => !destinos.has(`${i}:${k}`) && (FETCH_INTERP.has(t) || t === "pwsh" || t === "powershell" || t.startsWith("./"))));
+  if (!rodou) return null;
+  const todos = segs.flatMap((s) => s.tok);
+  const u = todos.find(isUrl);
+  return u ? { item: u, tipo: T.script, casa: false } : semNome(T.script, todos.join(" "));
 }
 
 /** todos os hits do comando (N ∪ N2; detectar só cresce com texto a mais) */
@@ -402,6 +433,8 @@ export function commandItems(command, { cwd = process.cwd() } = {}) {
         }
       }
     }
+    const b = baixarERodar(segs);
+    if (b) add(b);
   }
   return hits;
 }

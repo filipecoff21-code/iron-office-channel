@@ -17098,7 +17098,7 @@ function porteiroAskCheck(text2, options) {
 }
 
 // src/server.mjs
-var VERSION = "0.22.0";
+var VERSION = "0.22.1";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
