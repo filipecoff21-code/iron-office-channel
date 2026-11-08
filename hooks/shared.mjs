@@ -1,6 +1,7 @@
 // Iron Office — partes comuns ao hook de telemetria e ao servidor do canal (0.5.0):
 // os padrões de segredo apagados de todo texto que sai, e a chave `office_feed` do ~/.iron/config.yaml.
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -79,4 +80,65 @@ export function feedOn(home = homedir()) {
   const all = [...txt.matchAll(/^office_feed:[ \t]*["']?([A-Za-z0-9]+)["']?[ \t]*(?:#.*)?\r?$/gm)];
   if (!all.length) return true;
   return !["off", "false", "no", "0"].includes(all[all.length - 1][1].toLowerCase());
+}
+
+// Porteiro de instalação (0.22.0): o modo fica em ~/.iron/porteiro/modo (dentro da pasta que o Iron não pode tocar;
+// gate r9: saiu do config.yaml, que a loja e o salvar gravam). "todas" liga em toda sessão do Claude Code, "off" desliga;
+// sem arquivo ou com outro valor: "canal" (só a sessão do ironoffice). Lê a primeira palavra (BOM, aspas e comentário aceitos).
+export function porteiroMode(home = homedir()) {
+  let txt;
+  try {
+    txt = readFileSync(join(home, ".iron", "porteiro", "modo"), "utf8").replace(/^\uFEFF/, "");
+  } catch {
+    return "canal";
+  }
+  const m = /^[ \t]*["']?([A-Za-z0-9]+)["']?[ \t]*(?:#.*)?$/m.exec(txt.replace(/\r/g, ""));
+  const v = m ? m[1].toLowerCase() : "";
+  if (v === "todas") return "todas";
+  if (["off", "false", "no", "0"].includes(v)) return "off";
+  return "canal";
+}
+
+// ─── Porteiro: o que o gancho (hooks/porteiro.mjs) e o servidor (o clique e o ask) precisam combinar ───
+// Hash de 12 hex (48 bits; gate 54 r1: 8 hex dava colisão buscável): "pt-instalar-" (12) + 12 = 24, o máximo do id de opção.
+export const porteiroHash = (item) => createHash("sha1").update(String(item)).digest("hex").slice(0, 12);
+export const PORTEIRO_ID_RE = /^pt-(estudar|instalar|nao)-([a-f0-9]{12})$/;
+export const PORTEIRO_ROTULOS = { estudar: "Estudar antes (recomendado)", instalar: "Instalar mesmo assim", nao: "Não instalar" };
+// tipos sem jargão (o texto da pergunta é conferido pelo servidor). Revisão 1: quando o porteiro detecta mas não
+// consegue ler o nome, o item é o trecho do comando e o tipo ganha "; não consegui ler o nome".
+const TIPOS_BASE = [
+  "pacote npm", "pacote executado", "pacote Python", "pacote de um link", "pacote de uma pasta", "programa do Homebrew",
+  "repositório git", "script baixado ou gerado", "conector do Claude", "plugin do Claude Code", "loja de plugins",
+  "extensão do VS Code", "arquivo que dá ordens ao Iron",
+];
+export const PORTEIRO_SEM_NOME = "; não consegui ler o nome";
+export const PORTEIRO_TIPOS = TIPOS_BASE.flatMap((t) => [t, t + PORTEIRO_SEM_NOME]);
+export const porteiroPergunta = (item, tipo) => `O Iron quer instalar ${item} (${tipo}). Nada de fora entra no seu computador sem você decidir.`;
+export const porteiroPerguntaEstudo = (item) => `Depois do estudo: instalo ${item}?`;
+
+// gate 54 r1: o Iron escreve o texto e os ids do ask; sem esta conferência ele podia perguntar sobre uma coisa e mandar o id
+// de outra. Devolve null (não é pergunta do porteiro), { ok: true } ou { ok: false, error }.
+export function porteiroAskCheck(text, options) {
+  const opts = Array.isArray(options) ? options : [];
+  if (!opts.some((o) => typeof o?.id === "string" && o.id.startsWith("pt-"))) return null;
+  const erro = (e) => ({ ok: false, error: `Pergunta do porteiro fora do modelo: ${e}. Use exatamente o texto e as opções que o motivo do porteiro mandou.` });
+  let hash = null;
+  for (const o of opts) {
+    const m = typeof o?.id === "string" ? PORTEIRO_ID_RE.exec(o.id) : null;
+    if (!m) return erro(`a opção "${o?.label ?? ""}" não é do porteiro`);
+    if (hash && m[2] !== hash) return erro("as opções apontam pra itens diferentes");
+    hash = m[2];
+    if (o.label !== PORTEIRO_ROTULOS[m[1]]) return erro(`o rótulo do id ${o.id} tem que ser "${PORTEIRO_ROTULOS[m[1]]}"`);
+  }
+  const t = String(text ?? "");
+  let item = null;
+  for (const tipo of PORTEIRO_TIPOS) {
+    const pre = "O Iron quer instalar ";
+    const suf = ` (${tipo}). Nada de fora entra no seu computador sem você decidir.`;
+    if (t.startsWith(pre) && t.endsWith(suf) && t.length > pre.length + suf.length) item = t.slice(pre.length, t.length - suf.length);
+  }
+  if (item === null && t.startsWith("Depois do estudo: instalo ") && t.endsWith("?")) item = t.slice("Depois do estudo: instalo ".length, -1);
+  if (!item) return erro("o texto da pergunta mudou");
+  if (porteiroHash(item) !== hash) return erro(`o item "${item}" não é o do id`);
+  return { ok: true };
 }

@@ -12,9 +12,9 @@ import { execFile, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { estadoPrimeira } from "./primeira.mjs";
 import { fileURLToPath } from "node:url";
-import { redactKeys, feedOn } from "../hooks/shared.mjs";
+import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.21.0";
+const VERSION = "0.22.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -1037,6 +1037,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       ids.add(id);
       options.push({ id, label });
     }
+    // 0.22.0 (onda 54): pergunta do porteiro de instalação só no modelo (texto e rótulos), com o item batendo com o hash
+    const porteiro = porteiroAskCheck(q, options);
+    if (porteiro && !porteiro.ok) return text(porteiro.error, true);
     try {
       const store = storeArg(args);
       const res = await api("/api/chat/messages", {
@@ -1354,6 +1357,43 @@ async function notify(content, meta) {
 let backoff = 0;
 let authWarned = false;
 
+// 0.22.0 (onda 54): porteiro de instalação. O gancho hooks/porteiro.mjs barra o que é de fora e manda o Iron perguntar
+// pelo ask com os ids pt-<estudar|instalar|nao>-<hash de 12> (o OPTION_ID_RE do ask e do site só aceita a-z0-9_-, até 24;
+// PORTEIRO_ID_RE em hooks/shared.mjs). O ask com esses ids só sai com o texto do modelo e o item batendo com o hash
+// (porteiroAskCheck, gate 54 r1: sem isso o Iron perguntava sobre uma coisa e mandava o id de outra). Quem libera é ESTE processo, ao receber o clique do aluno
+// (o Iron não pode tocar em ~/.iron/porteiro: o gancho barra). "Instalar mesmo assim" libera aquele item por 30 minutos.
+const PORTEIRO_LIBERA_MS = 30 * 60_000;
+function porteiroResposta(meta) {
+  const ans = meta && typeof meta === "object" && meta.answer && typeof meta.answer === "object" ? meta.answer : null;
+  const m = ans && typeof ans.option_id === "string" ? PORTEIRO_ID_RE.exec(ans.option_id) : null;
+  if (!m) return "";
+  const [, acao, hash] = m;
+  if (acao === "instalar") {
+    try {
+      const dir = join(homedir(), ".iron", "porteiro");
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const file = join(dir, "liberados.json");
+      let arr = [];
+      try {
+        const old = JSON.parse(readFileSync(file, "utf8"));
+        if (Array.isArray(old)) arr = old;
+      } catch {
+        // sem arquivo ou ilegível: começa do zero
+      }
+      const now = Date.now();
+      arr = arr.filter((l) => l && typeof l.hash === "string" && Number(l.until) > now && l.hash !== hash);
+      arr.push({ hash, at: now, until: now + PORTEIRO_LIBERA_MS });
+      writeFileSync(file, JSON.stringify(arr), { mode: 0o600 });
+    } catch (e) {
+      log(`porteiro: não consegui gravar a liberação (${e.message})`);
+      return "[porteiro: a liberação falhou neste computador; diga ao aluno e não instale]\n";
+    }
+    return "[porteiro: liberado por 30 minutos; rode o mesmo comando de novo]\n";
+  }
+  if (acao === "nao") return "[porteiro: o aluno não quis instalar; siga sem]\n";
+  return "[porteiro: carregue a skill estudar-instalacao antes de responder]\n";
+}
+
 // Entrega em 2 fases: o pull reivindica (claimed); só confirma (ack → delivered) o que de fato
 // entrou na sessão. O que não for confirmado em 60 s o banco devolve pra fila.
 async function pullOnce() {
@@ -1388,7 +1428,8 @@ async function pullOnce() {
     // resposta de botão (meta.answer) não conta como 1ª mensagem: a conversa ainda não abriu
     const contaPrimeira = !system && !primeiraFeita && !(m.meta && typeof m.meta === "object" && m.meta.answer);
     const primeira = contaPrimeira ? linhaPrimeira(content) : "";
-    const ok = await notify(system ? content : `${dica}${primeira}${storePrefix(store)}${content}`, {
+    const porteiro = system ? "" : porteiroResposta(m.meta);
+    const ok = await notify(system ? content : `${porteiro}${dica}${primeira}${storePrefix(store)}${content}`, {
       chat_id: chatId,
       message_id: m.id,
       user: system ? "sistema" : "aluno",

@@ -1,0 +1,41 @@
+{
+  "pacotes": [
+    "@anthropic-ai/claude-code",
+    "@playwright/test",
+    "@resvg/resvg-js",
+    "@shopify/dev-mcp",
+    "apify-client",
+    "autoprefixer",
+    "cheerio",
+    "create-video",
+    "create-vite",
+    "ffmpeg",
+    "git-filter-repo",
+    "iron-edge",
+    "lucide-react",
+    "motion",
+    "playwright",
+    "remotion",
+    "serve",
+    "shadcn",
+    "tailwindcss"
+  ],
+  "escopos": [
+    "@anthropic-ai",
+    "@ffmpeg",
+    "@fontsource",
+    "@remotion",
+    "@shopify",
+    "@tailwindcss"
+  ],
+  "dominios": [
+    "app.dropkiller.com",
+    "github.com/filipecoff21-code",
+    "ironoffice.app",
+    "mcp.facebook.com"
+  ],
+  "plugins": [
+    "iron-office",
+    "iron-office-channel"
+  ]
+}

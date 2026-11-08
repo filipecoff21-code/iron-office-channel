@@ -16977,6 +16977,7 @@ import { fileURLToPath } from "node:url";
 
 // hooks/shared.mjs
 import { readFileSync as readFileSync2 } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join as join2 } from "node:path";
 var SECRET_PATTERNS = [
@@ -17051,9 +17052,53 @@ function feedOn(home = homedir()) {
   if (!all.length) return true;
   return !["off", "false", "no", "0"].includes(all[all.length - 1][1].toLowerCase());
 }
+var porteiroHash = (item) => createHash("sha1").update(String(item)).digest("hex").slice(0, 12);
+var PORTEIRO_ID_RE = /^pt-(estudar|instalar|nao)-([a-f0-9]{12})$/;
+var PORTEIRO_ROTULOS = { estudar: "Estudar antes (recomendado)", instalar: "Instalar mesmo assim", nao: "N\xE3o instalar" };
+var TIPOS_BASE = [
+  "pacote npm",
+  "pacote executado",
+  "pacote Python",
+  "pacote de um link",
+  "pacote de uma pasta",
+  "programa do Homebrew",
+  "reposit\xF3rio git",
+  "script baixado ou gerado",
+  "conector do Claude",
+  "plugin do Claude Code",
+  "loja de plugins",
+  "extens\xE3o do VS Code",
+  "arquivo que d\xE1 ordens ao Iron"
+];
+var PORTEIRO_SEM_NOME = "; n\xE3o consegui ler o nome";
+var PORTEIRO_TIPOS = TIPOS_BASE.flatMap((t) => [t, t + PORTEIRO_SEM_NOME]);
+function porteiroAskCheck(text2, options) {
+  const opts = Array.isArray(options) ? options : [];
+  if (!opts.some((o) => typeof o?.id === "string" && o.id.startsWith("pt-"))) return null;
+  const erro = (e) => ({ ok: false, error: `Pergunta do porteiro fora do modelo: ${e}. Use exatamente o texto e as op\xE7\xF5es que o motivo do porteiro mandou.` });
+  let hash = null;
+  for (const o of opts) {
+    const m = typeof o?.id === "string" ? PORTEIRO_ID_RE.exec(o.id) : null;
+    if (!m) return erro(`a op\xE7\xE3o "${o?.label ?? ""}" n\xE3o \xE9 do porteiro`);
+    if (hash && m[2] !== hash) return erro("as op\xE7\xF5es apontam pra itens diferentes");
+    hash = m[2];
+    if (o.label !== PORTEIRO_ROTULOS[m[1]]) return erro(`o r\xF3tulo do id ${o.id} tem que ser "${PORTEIRO_ROTULOS[m[1]]}"`);
+  }
+  const t = String(text2 ?? "");
+  let item = null;
+  for (const tipo of PORTEIRO_TIPOS) {
+    const pre = "O Iron quer instalar ";
+    const suf = ` (${tipo}). Nada de fora entra no seu computador sem voc\xEA decidir.`;
+    if (t.startsWith(pre) && t.endsWith(suf) && t.length > pre.length + suf.length) item = t.slice(pre.length, t.length - suf.length);
+  }
+  if (item === null && t.startsWith("Depois do estudo: instalo ") && t.endsWith("?")) item = t.slice("Depois do estudo: instalo ".length, -1);
+  if (!item) return erro("o texto da pergunta mudou");
+  if (porteiroHash(item) !== hash) return erro(`o item "${item}" n\xE3o \xE9 o do id`);
+  return { ok: true };
+}
 
 // src/server.mjs
-var VERSION = "0.21.0";
+var VERSION = "0.22.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
@@ -17931,6 +17976,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       ids.add(id);
       options.push({ id, label });
     }
+    const porteiro = porteiroAskCheck(q, options);
+    if (porteiro && !porteiro.ok) return text(porteiro.error, true);
     try {
       const store = storeArg(args);
       const res = await api("/api/chat/messages", {
@@ -18229,6 +18276,36 @@ async function notify(content, meta2) {
 }
 var backoff = 0;
 var authWarned = false;
+var PORTEIRO_LIBERA_MS = 30 * 6e4;
+function porteiroResposta(meta2) {
+  const ans = meta2 && typeof meta2 === "object" && meta2.answer && typeof meta2.answer === "object" ? meta2.answer : null;
+  const m = ans && typeof ans.option_id === "string" ? PORTEIRO_ID_RE.exec(ans.option_id) : null;
+  if (!m) return "";
+  const [, acao, hash] = m;
+  if (acao === "instalar") {
+    try {
+      const dir = join3(homedir2(), ".iron", "porteiro");
+      mkdirSync(dir, { recursive: true, mode: 448 });
+      const file = join3(dir, "liberados.json");
+      let arr = [];
+      try {
+        const old = JSON.parse(readFileSync3(file, "utf8"));
+        if (Array.isArray(old)) arr = old;
+      } catch {
+      }
+      const now = Date.now();
+      arr = arr.filter((l) => l && typeof l.hash === "string" && Number(l.until) > now && l.hash !== hash);
+      arr.push({ hash, at: now, until: now + PORTEIRO_LIBERA_MS });
+      writeFileSync(file, JSON.stringify(arr), { mode: 384 });
+    } catch (e) {
+      log(`porteiro: n\xE3o consegui gravar a libera\xE7\xE3o (${e.message})`);
+      return "[porteiro: a libera\xE7\xE3o falhou neste computador; diga ao aluno e n\xE3o instale]\n";
+    }
+    return "[porteiro: liberado por 30 minutos; rode o mesmo comando de novo]\n";
+  }
+  if (acao === "nao") return "[porteiro: o aluno n\xE3o quis instalar; siga sem]\n";
+  return "[porteiro: carregue a skill estudar-instalacao antes de responder]\n";
+}
 async function pullOnce() {
   const data = await api("/api/chat/pull");
   state.lastPullAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -18255,7 +18332,8 @@ async function pullOnce() {
     if (dica && !trilhaPEstado(chatId)) trilhaP.set(chatId, { estado: "pedido", ts: Date.now() });
     const contaPrimeira = !system && !primeiraFeita && !(m.meta && typeof m.meta === "object" && m.meta.answer);
     const primeira = contaPrimeira ? linhaPrimeira(content) : "";
-    const ok = await notify(system ? content : `${dica}${primeira}${storePrefix(store)}${content}`, {
+    const porteiro = system ? "" : porteiroResposta(m.meta);
+    const ok = await notify(system ? content : `${porteiro}${dica}${primeira}${storePrefix(store)}${content}`, {
       chat_id: chatId,
       message_id: m.id,
       user: system ? "sistema" : "aluno",
