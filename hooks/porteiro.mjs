@@ -116,7 +116,7 @@ const INTERP = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "iex", "invo
 const FETCH = new Set(["curl", "wget", "iwr", "irm", "invoke-webrequest", "invoke-restmethod", "fetch", "downloadstring", "downloadfile"]);
 // `(New-Object Net.WebClient).DownloadString(…)` normalizado vira a palavra `.downloadstring` (ou `c.downloadstring` com variável)
 const ehFetch = (t) => FETCH.has(t) || /\.download(string|file)$/.test(t);
-const FETCH_INTERP = new Set(["sh", "bash", "zsh", "source", ".", "iex", "invoke-expression", "node", "python", "python3"]);
+const FETCH_INTERP = new Set(["sh", "bash", "zsh", "source", ".", "iex", "invoke-expression", "eval", "node", "python", "python3"]);
 const PREFIX = new Set(["sudo", "env", "nohup", "command", "time", "exec", "builtin", "stdbuf", "nice", "timeout", "busybox", "xargs"]);
 // flags cujo valor não é pacote (só pra decidir "da casa" e nomear; nunca pra detectar)
 const VALUE_FLAGS = new Set(["--prefix", "--registry", "--cache", "--tag", "--workspace", "-w", "--loglevel", "--depth", "--filter", "-f", "-c", "--dir", "--cwd", "-r", "--requirement", "-e", "--editable", "-i", "--index-url", "--extra-index-url", "-t", "--target", "--scope", "-s", "--transport", "--env", "-h", "--header", "-b", "--branch", "-o", "--origin", "--otp"]);
@@ -370,24 +370,51 @@ function escreveProtegido(tok) {
 // (`curl -o ./foto.jpg …` sozinho não roda nada; se `./i.sh` aparece em outra posição, conta).
 const SAIDA_CURL = /^-[a-z]*o|^--(?:output|remote-name)/;
 const SAIDA_WGET = /^-[a-z]*o|^--output-document/;
+// Onda 55: wget sem -O grava (com o nome da URL); Start-Process, start, saps e o & do PowerShell rodam; o destino gravado
+// citado de novo, em qualquer caminho, roda; e baixar pra variável num trecho e dar iex/eval/bash -c "$x" noutro também é baixar e rodar.
 const NAO_GRAVA = new Set(["-", "/dev/null", "nul", "null"]);
-function baixarERodar(segs) {
+const RODA_WIN = new Set(["start-process", "saps"]);
+// o & de chamada do PowerShell na frente de um caminho ou variável (o split já tirou o & dos tokens; && não casa)
+const OPERADOR_CHAMADA = /(?:^|[\s;|(])&\s*["']?(?:\$|\.{1,2}[\\/]|\/|~[\\/]|[a-z]:[\\/])/i;
+const nomeDoArquivo = (t) => t.replace(/[?#].*$/, "").split("/").pop();
+function rodaVariavel(s) {
+  // uma variável de verdade ("$s"), não `eval "$(ssh-agent -s)"`
+  const temVariavel = /\$\{?[a-z_]/i.test(s.text);
+  return s.tok.some((t, k) => t === "iex" || t === "invoke-expression" || (temVariavel && (t === "eval" || (["sh", "bash", "zsh"].includes(t) && s.tok[k + 1] === "-c"))));
+}
+function baixarERodar(segs, comando) {
+  for (let i = 0; i < segs.length; i++) {
+    if (!segs[i].tok.some(ehFetch)) continue;
+    const u = segs[i].tok.find(isUrl);
+    if (u && segs.slice(i + 1).some(rodaVariavel)) return { item: u, tipo: T.script, casa: false };
+  }
   let gravou = false;
   const destinos = new Set();
+  const arquivos = new Set();
   segs.forEach((s, i) => {
     const curl = s.tok.includes("curl"), wget = s.tok.includes("wget");
+    let wgetComSaida = false;
     s.tok.forEach((t, k) => {
+      if (wget && SAIDA_WGET.test(t)) wgetComSaida = true;
       if (!((curl && SAIDA_CURL.test(t)) || (wget && SAIDA_WGET.test(t)) || t === "-outfile")) return;
       const colado = t.startsWith("--") ? t.split("=")[1] : t === "-outfile" ? "" : t.slice(t.indexOf("o", 1) + 1);
       const destino = colado || s.tok[k + 1];
       if (NAO_GRAVA.has(destino)) return;
       gravou = true;
+      if (destino) arquivos.add(nomeDoArquivo(destino));
       if (!colado) destinos.add(`${i}:${k + 1}`);
     });
+    if (wget && !wgetComSaida && !s.tok.includes("--spider")) {
+      const url = s.tok.slice(s.tok.indexOf("wget") + 1).find(isUrl);
+      if (url) { gravou = true; arquivos.add(nomeDoArquivo(url)); }
+    }
     if (s.tok.some((t) => /\.downloadfile$/.test(t))) gravou = true;
   });
   if (!gravou) return null;
-  const rodou = segs.some((s, i) => s.tok.some((t, k) => !destinos.has(`${i}:${k}`) && (FETCH_INTERP.has(t) || t === "pwsh" || t === "powershell" || t.startsWith("./"))));
+  // `npm start` é script do projeto, não o start do Windows
+  const roda = (s, t, k) => FETCH_INTERP.has(t) || t === "pwsh" || t === "powershell" || t.startsWith("./") || RODA_WIN.has(t) ||
+    (t === "start" && !s.tok.slice(0, k).some((x) => NPM_FAM.has(x))) || (!isFlag(t) && !isUrl(t) && arquivos.has(nomeDoArquivo(t)));
+  const rodou = OPERADOR_CHAMADA.test(comando) || segs.some((s, i) => s.tok.some((t, k) => !destinos.has(`${i}:${k}`) && roda(s, t, k)));
   if (!rodou) return null;
   const todos = segs.flatMap((s) => s.tok);
   const u = todos.find(isUrl);
@@ -428,12 +455,14 @@ export function commandItems(command, { cwd = process.cwd() } = {}) {
           let j = i - 1;
           while (j > 0 && segs[j].pipeFromPrev) j--;
           const feed = segs.slice(j, i).map((s) => s.tok.join(" ")).join(" | ");
-          const u = segs.slice(j, i).flatMap((s) => s.tok).find(isUrl);
+          // onda 55: `$s = irm <url>; $s | iex`: o que alimenta é só a variável, e o nome é a url do trecho de antes
+          const antes = /^\s*\$\w+\s*$/.test(segs[j].text) ? segs.slice(0, j).flatMap((s) => s.tok).find(isUrl) : undefined;
+          const u = segs.slice(j, i).flatMap((s) => s.tok).find(isUrl) ?? antes;
           add(u ? { item: u, tipo: T.script, casa: false } : semNome(T.script, feed));
         }
       }
     }
-    const b = baixarERodar(segs);
+    const b = baixarERodar(segs, command);
     if (b) add(b);
   }
   return hits;

@@ -16947,7 +16947,7 @@ var StdioServerTransport = class {
 };
 
 // src/server.mjs
-import { readFileSync as readFileSync3, writeFileSync, mkdirSync, unlinkSync, existsSync as existsSync2 } from "node:fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync, unlinkSync as unlinkSync2, existsSync as existsSync2 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { dirname, join as join3 } from "node:path";
@@ -16972,11 +16972,62 @@ function estadoPrimeira(cwd) {
   }
 }
 
+// src/lock.mjs
+import { linkSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeFileSync } from "node:fs";
+var ler = (p) => {
+  try {
+    return parseInt(readFileSync2(p, "utf8").trim(), 10);
+  } catch {
+    return NaN;
+  }
+};
+var mesmo = (a, b) => a === b || Number.isNaN(a) && Number.isNaN(b);
+async function acquireLockFile({ path, pid, holderAlive: holderAlive2, log: log2 = () => {
+}, antesDeTomar = async () => {
+} }) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(path, String(pid), { flag: "wx" });
+      return true;
+    } catch (e) {
+      if (!e || e.code !== "EEXIST") {
+        log2(`lock indispon\xEDvel (${e?.message}); seguindo sem lock`);
+        return true;
+      }
+    }
+    let holder = ler(path);
+    if (Number.isNaN(holder)) {
+      await new Promise((r) => setTimeout(r, 200));
+      holder = ler(path);
+    }
+    if (holder === pid) return true;
+    if (await holderAlive2(holder)) return false;
+    await antesDeTomar();
+    const orfao = `${path}.orfao.${pid}`;
+    try {
+      renameSync(path, orfao);
+    } catch {
+      continue;
+    }
+    if (!mesmo(ler(orfao), holder)) {
+      try {
+        linkSync(orfao, path);
+      } catch {
+      }
+    }
+    try {
+      unlinkSync(orfao);
+    } catch {
+    }
+  }
+  return false;
+}
+
 // src/server.mjs
 import { fileURLToPath } from "node:url";
 
 // hooks/shared.mjs
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join as join2 } from "node:path";
@@ -17044,7 +17095,7 @@ function redactKeys(s, max) {
 function feedOn(home = homedir()) {
   let txt;
   try {
-    txt = readFileSync2(join2(home, ".iron", "config.yaml"), "utf8").replace(/^\uFEFF/, "");
+    txt = readFileSync3(join2(home, ".iron", "config.yaml"), "utf8").replace(/^\uFEFF/, "");
   } catch {
     return true;
   }
@@ -17098,7 +17149,7 @@ function porteiroAskCheck(text2, options) {
 }
 
 // src/server.mjs
-var VERSION = "0.22.1";
+var VERSION = "0.23.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
@@ -17124,7 +17175,7 @@ function log(msg) {
 }
 function readKey() {
   try {
-    const buf = readFileSync3(KEY_PATH);
+    const buf = readFileSync4(KEY_PATH);
     const utf16 = buf.length >= 2 && buf[0] === 255 && buf[1] === 254;
     return buf.toString(utf16 ? "utf16le" : "utf8").replace(/[﻿\u0000]/g, "").trim();
   } catch {
@@ -17194,47 +17245,18 @@ function pidAlive(pid) {
 async function holderAlive(pid) {
   if (!pid || pid === process.pid || !pidAlive(pid)) return false;
   const info = await processInfo(pid);
-  return info ? info.cmd.includes("iron-office") : true;
+  return info ? info.cmd.includes("iron-office") && info.cmd.includes("server.mjs") : true;
 }
 async function acquireLock() {
   try {
     mkdirSync(LOCK_DIR, { recursive: true });
   } catch {
   }
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      writeFileSync(LOCK_PATH, String(process.pid), { flag: "wx" });
-      return true;
-    } catch (e) {
-      if (!e || e.code !== "EEXIST") {
-        log(`lock indispon\xEDvel (${e?.message}); seguindo sem lock`);
-        return true;
-      }
-    }
-    const readHolder = () => {
-      try {
-        return parseInt(readFileSync3(LOCK_PATH, "utf8").trim(), 10);
-      } catch {
-        return NaN;
-      }
-    };
-    let holder = readHolder();
-    if (Number.isNaN(holder)) {
-      await new Promise((r) => setTimeout(r, 200));
-      holder = readHolder();
-    }
-    if (holder === process.pid) return true;
-    if (await holderAlive(holder)) return false;
-    try {
-      unlinkSync(LOCK_PATH);
-    } catch {
-    }
-  }
-  return false;
+  return acquireLockFile({ path: LOCK_PATH, pid: process.pid, holderAlive, log });
 }
 function releaseLock() {
   try {
-    if (readFileSync3(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync(LOCK_PATH);
+    if (readFileSync4(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync2(LOCK_PATH);
   } catch {
   }
 }
@@ -17479,8 +17501,8 @@ function adsRefreshAvisa(conv) {
   r.avisos++;
   return true;
 }
-function adsRefreshGravou(project, desde) {
-  for (const [conv, r] of adsRefresh) if (r.ts <= desde && (!r.project || r.project === project)) adsRefresh.delete(conv);
+function adsRefreshGravou(project, desde, janela) {
+  for (const [conv, r] of adsRefresh) if (r.ts <= desde && (!r.project || r.project === project) && (janela !== 1 || r.soHoje)) adsRefresh.delete(conv);
 }
 function avisosDoReply(conv, body) {
   try {
@@ -18067,7 +18089,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const antesDeGravar = Date.now();
       const res = await api(`/api/stores/${id}/ads`, { method: "POST", body: { snapshot: scrubbed } });
-      if (res?.ok === true) adsRefreshGravou(id, antesDeGravar);
+      if (res?.ok === true) adsRefreshGravou(id, antesDeGravar, scrubbed.window_days);
       const ps = res?.pricing_summary;
       const pricing = ps && typeof ps.text === "string" ? redactKeys(ps.text, 300).text : null;
       const reading = ps && typeof ps.reading === "string" ? ps.reading.slice(0, 20) : null;
@@ -18289,14 +18311,14 @@ function porteiroResposta(meta2) {
       const file = join3(dir, "liberados.json");
       let arr = [];
       try {
-        const old = JSON.parse(readFileSync3(file, "utf8"));
+        const old = JSON.parse(readFileSync4(file, "utf8"));
         if (Array.isArray(old)) arr = old;
       } catch {
       }
       const now = Date.now();
       arr = arr.filter((l) => l && typeof l.hash === "string" && Number(l.until) > now && l.hash !== hash);
       arr.push({ hash, at: now, until: now + PORTEIRO_LIBERA_MS });
-      writeFileSync(file, JSON.stringify(arr), { mode: 384 });
+      writeFileSync2(file, JSON.stringify(arr), { mode: 384 });
     } catch (e) {
       log(`porteiro: n\xE3o consegui gravar a libera\xE7\xE3o (${e.message})`);
       return "[porteiro: a libera\xE7\xE3o falhou neste computador; diga ao aluno e n\xE3o instale]\n";
@@ -18344,7 +18366,7 @@ async function pullOnce() {
       if (contaPrimeira) primeiraFeita = true;
       pendenteEntrou(chatId, m.id, content);
       if (!system && formularioEstado(chatId) === "aberto") formularioMarca(chatId, "voltou");
-      if (!system && ADS_REFRESH_RE.test(content)) adsRefresh.set(chatId, { ts: Date.now(), avisos: 0, project: store?.id ?? null });
+      if (!system && ADS_REFRESH_RE.test(content)) adsRefresh.set(chatId, { ts: Date.now(), avisos: 0, project: store?.id ?? null, soHoje: /· hoje\s*$/i.test(content) });
       toAck.push(m.id);
       lastStoreId = store && UUID_RE.test(store.id) ? store.id : null;
     }
@@ -18408,7 +18430,7 @@ function strList(v) {
 function readJson(path) {
   let text2;
   try {
-    text2 = readFileSync3(path, "utf8");
+    text2 = readFileSync4(path, "utf8");
   } catch {
     return null;
   }

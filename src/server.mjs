@@ -11,10 +11,11 @@ import { homedir } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { estadoPrimeira } from "./primeira.mjs";
+import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.22.1";
+const VERSION = "0.23.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -140,7 +141,7 @@ function pidAlive(pid) {
 async function holderAlive(pid) {
   if (!pid || pid === process.pid || !pidAlive(pid)) return false;
   const info = await processInfo(pid);
-  return info ? info.cmd.includes("iron-office") : true;
+  return info ? info.cmd.includes("iron-office") && info.cmd.includes("server.mjs") : true; // onda 55: editor aberto na pasta do canal não é dono
 }
 
 async function acquireLock() {
@@ -149,38 +150,7 @@ async function acquireLock() {
   } catch {
     // segue: writeFile acusa se não der
   }
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      writeFileSync(LOCK_PATH, String(process.pid), { flag: "wx" }); // atômico: falha se já existe
-      return true;
-    } catch (e) {
-      if (!e || e.code !== "EEXIST") {
-        log(`lock indisponível (${e?.message}); seguindo sem lock`);
-        return true;
-      }
-    }
-    const readHolder = () => {
-      try {
-        return parseInt(readFileSync(LOCK_PATH, "utf8").trim(), 10);
-      } catch {
-        return NaN;
-      }
-    };
-    let holder = readHolder();
-    if (Number.isNaN(holder)) {
-      // o `wx` cria o arquivo vazio e só depois grava o pid: espera e relê antes de chamar de órfão
-      await new Promise((r) => setTimeout(r, 200));
-      holder = readHolder();
-    }
-    if (holder === process.pid) return true;
-    if (await holderAlive(holder)) return false;
-    try {
-      unlinkSync(LOCK_PATH); // lock órfão
-    } catch {
-      // outro processo apagou antes: a próxima volta resolve
-    }
-  }
-  return false;
+  return acquireLockFile({ path: LOCK_PATH, pid: process.pid, holderAlive, log });
 }
 
 function releaseLock() {
@@ -488,8 +458,9 @@ function adsRefreshAvisa(conv) {
   r.avisos++;
   return true;
 }
-function adsRefreshGravou(project, desde) {
-  for (const [conv, r] of adsRefresh) if (r.ts <= desde && (!r.project || r.project === project)) adsRefresh.delete(conv);
+// onda 55: medir 7, 15 ou 30 grava o retrato de hoje antes: só o período pedido encerra o lembrete
+function adsRefreshGravou(project, desde, janela) {
+  for (const [conv, r] of adsRefresh) if (r.ts <= desde && (!r.project || r.project === project) && (janela !== 1 || r.soHoje)) adsRefresh.delete(conv);
 }
 function avisosDoReply(conv, body) {
   // nunca derruba o reply: a mensagem já saiu, e um erro aqui faria o Iron reenviar
@@ -1129,7 +1100,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const antesDeGravar = Date.now();
       const res = await api(`/api/stores/${id}/ads`, { method: "POST", body: { snapshot: scrubbed } });
-      if (res?.ok === true) adsRefreshGravou(id, antesDeGravar);
+      if (res?.ok === true) adsRefreshGravou(id, antesDeGravar, scrubbed.window_days);
       // 0.9.2: o site devolve o resumo da precificação; vai pro Iron só a frase e a leitura (texto do próprio site)
       const ps = res?.pricing_summary;
       const pricing = ps && typeof ps.text === "string" ? redactKeys(ps.text, 300).text : null;
@@ -1441,7 +1412,7 @@ async function pullOnce() {
       // 0.14.2: entra na fila do lote (aluno e sistema); a resposta de formulário aberto marca "voltou"
       pendenteEntrou(chatId, m.id, content);
       if (!system && formularioEstado(chatId) === "aberto") formularioMarca(chatId, "voltou");
-      if (!system && ADS_REFRESH_RE.test(content)) adsRefresh.set(chatId, { ts: Date.now(), avisos: 0, project: store?.id ?? null });
+      if (!system && ADS_REFRESH_RE.test(content)) adsRefresh.set(chatId, { ts: Date.now(), avisos: 0, project: store?.id ?? null, soHoje: /· hoje\s*$/i.test(content) });
       toAck.push(m.id);
       lastStoreId = store && UUID_RE.test(store.id) ? store.id : null;
     }
