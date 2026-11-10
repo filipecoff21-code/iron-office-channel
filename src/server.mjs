@@ -15,7 +15,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.24.0";
+const VERSION = "0.24.1";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -201,7 +201,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // 0.12.0 (onda 30): páginas. A URL passa pelo filtro de segredos: se o filtro mexeu (havia chave/token nela), não vai.
 // Regra igual à do site (lib/pages.ts validPageUrl): http(s), ≤ 500, sem usuário:senha, porta padrão, host com TLD.
 const PAGE_KINDS = ["landing", "clone", "shopify", "outra", "referencia"];
-const SPY_RESPONSE_MAX = 60_000;
+// ponta a ponta da 31a: 54 mil caracteres passaram do teto do Claude Code (25 mil tokens); 30 mil cabem com folga
+const SPY_RESPONSE_MAX = 30_000;
 function pageUrlArg(v) {
   if (typeof v !== "string") return null;
   const s = v.trim();

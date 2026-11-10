@@ -1721,7 +1721,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
   check("45a ads_status: descrição com 1 | 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("1 | 7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → versão atual", init?.serverInfo?.version === "0.24.0", JSON.stringify(init?.serverInfo));
+  check("45a initialize → versão atual", init?.serverInfo?.version === "0.24.1", JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1769,7 +1769,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ads = tools.find((t) => t.name === "ads_status");
   check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
   check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
-  check("45b initialize → versão atual", init?.serverInfo?.version === "0.24.0", JSON.stringify(init?.serverInfo));
+  check("45b initialize → versão atual", init?.serverInfo?.version === "0.24.1", JSON.stringify(init?.serverInfo));
   call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
   call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
   call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
@@ -2018,7 +2018,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 
   let s = await sessao(base());
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.24.0" && (init?.instructions ?? "").length === BLOCO_ATUAL, String((init?.instructions ?? "").length));
+  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.24.1" && (init?.instructions ?? "").length === BLOCO_ATUAL, String((init?.instructions ?? "").length));
   await manda(msg("e0", "Sim", { answer: { question_id: "q", option_id: "a" } }));
   await manda(msg("e1", "ação feita", { system: "action" }));
   check("49 linha: resposta de botão não leva e não gasta a vez", !texto(s, "e0").includes("[primeira conversa"), texto(s, "e0"));
@@ -2471,11 +2471,11 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("31a: campo estranho do dry_run não passa", !txt(s, 3).includes("nao-passa"));
   const run = JSON.parse(txt(s, 4) || "{}");
   check("31a: rodada com quote devolve items e references, com o quote no corpo", bodies[1]?.quote === "1800000000000.QQ" && run.ok === true && run.run_id === "r1" && run.references?.[0]?.ads_active === 3 && run.searched?.country === "BR", txt(s, 4).slice(0, 200));
-  check("31a: items cortados em 200, campo estranho e imagem fora", run.items?.length === 200 && !txt(s, 4).includes("nao-passa") && !("image" in (run.items?.[0] ?? {})) && run.items?.[0]?.page_name === "Loja 0");
+  check("31a: items cortados em 200 (o resto dito em items_cut), campo estranho e imagem fora", (run.items?.length ?? 0) + (run.items_cut ?? 0) === 200 && run.items?.length > 100 && !txt(s, 4).includes("nao-passa") && !("image" in (run.items?.[0] ?? {})) && run.items?.[0]?.page_name === "Loja 0");
   call(s, 20, "spy_run", { project_id: LOJA, terms: ["grande"], quote: "q" });
   await sleep(500);
   const big = JSON.parse(txt(s, 20) || "{}");
-  check("31a r1: 200 anúncios grandes cabem em 60 mil caracteres, ficam os mais antigos e o corte é dito", txt(s, 20).length <= 60000 && big.items?.length > 0 && big.items[0].days === 199 && big.items_cut === 200 - big.items.length, `${txt(s, 20).length} ${big.items_cut}`);
+  check("31a r1: 200 anúncios grandes cabem em 30 mil caracteres, ficam os mais antigos e o corte é dito", txt(s, 20).length <= 30000 && big.items?.length > 0 && big.items[0].days === 199 && big.items_cut === 200 - big.items.length, `${txt(s, 20).length} ${big.items_cut}`);
   check("31a r1: endereço com chave não vira referência; o bom passa inteiro", big.references?.length === 1 && big.references[0].link_url === "https://b.com/p", JSON.stringify(big.references));
   check("31a: 402 do site vira sem apify", /"reason":"sem apify"/.test(txt(s, 5)), txt(s, 5));
   check("31a: 408 vira demorou", /"reason":"demorou"/.test(txt(s, 6)), txt(s, 6));

@@ -60,7 +60,7 @@ Prefira `npx iron-edge office`, que faz isso tudo e confere cada passo.
 - Chave inválida: avisa uma vez no terminal e tenta de novo depois de 5 minutos.
 - Pra testar contra um servidor local: `IRON_OFFICE_URL=http://localhost:3000`.
 
-**0.24.0 (onda 31a):** ferramenta `spy_run`: pede ao site pra rodar a Biblioteca de Anúncios no Apify com a chave do aluno, que fica cifrada no servidor e nunca passa por aqui. Sempre `dry_run` primeiro, `ask` com o custo e a rodada só com o `quote`. O `page_save` aceita `kind: "referencia"` e `note` (até 160), pras Referências do nicho da aba Páginas.
+**0.24.0 (onda 31a):** ferramenta `spy_run`: pede ao site pra rodar a Biblioteca de Anúncios no Apify com a chave do aluno, que fica cifrada no servidor e nunca passa por aqui. Sempre `dry_run` primeiro, `ask` com o custo e a rodada só com o `quote`. O `page_save` aceita `kind: "referencia"` e `note` (até 160), pras Referências do nicho da aba Páginas. Na 0.24.1, a resposta do `spy_run` cabe em 30 mil caracteres (a de 54 mil passou do teto de ferramenta do Claude Code).
 
 ## Fechar o canal
 
