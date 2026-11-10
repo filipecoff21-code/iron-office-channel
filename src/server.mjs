@@ -15,7 +15,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.24.1";
+const VERSION = "0.25.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -743,7 +743,7 @@ const TOOLS = DEGRADED
       {
         name: "spy_run",
         description:
-          "Pede ao Iron Office pra rodar a Biblioteca de Anúncios da Meta no Apify com a chave do aluno (skill `espiar`; a chave fica no servidor, nunca peça nem use APIFY_TOKEN). Sempre primeiro com `dry_run: true`: devolve `estimate_usd`, `runs_left` e `quote` (vale 15 min). Depois o `ask` 'Vai custar ≈ US$ X na sua conta do Apify. Procuro?' (Sim / Não). Só no Sim, chame de novo com o mesmo pedido e o `quote`: devolve `items` (anúncios enxutos: anunciante, dias no ar, destino, texto) e `references` (até 5 páginas pra estudar, já filtradas). Respostas `{ ok: false, reason }`: `sem apify` (mande os 3 passos: Integrações → Apify → colar o token), `sem orçamento`, `limite do dia`, `sem crédito no Apify`, `chave inválida`, `muitas seguidas`, `demorou` (pode ter cobrado; tente com menos anúncios), `apify fora`, `sem resposta`. O `quote` vale uma rodada: tentar de novo é custo e sim de novo. Só na sessão aberta com ironoffice.",
+          "Pede ao Iron Office pra rodar a Biblioteca de Anúncios da Meta no Apify com a chave do aluno (skill `espiar`; a chave fica no servidor, nunca peça nem use APIFY_TOKEN). Um país por chamada: região com mais de um país = uma chamada por país (`dry_run` de cada um, um `quote` por país). `terms` na língua do país, só o tipo do produto e o uso, sem marca nem nome de modelo. Sempre primeiro com `dry_run: true`: devolve `estimate_usd`, `runs_left` e `quote` (vale 15 min). Depois o `ask` do custo (Sim / Não). Só no Sim, chame de novo com o mesmo pedido e o `quote`: devolve `items` (anúncios enxutos), `references` (até 5 páginas cujo anúncio fala do produto, sem marketplace) e `dropped` (o que ficou de fora e por quê: diga ao aluno). Respostas `{ ok: false, reason }`: `sem apify` (mande os 3 passos: Integrações → Apify → colar o token), `sem orçamento`, `limite do dia`, `sem crédito no Apify`, `chave inválida`, `muitas seguidas`, `demorou` (pode ter cobrado; tente com menos anúncios), `apify fora`, `sem resposta`. O `quote` vale uma rodada: tentar de novo é custo e sim de novo. Só na sessão aberta com ironoffice.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1232,12 +1232,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     // só o que a análise usa, campo a campo: o texto do anúncio é de terceiro
     const slimItem = (a) => ({ page_name: safe(a?.page_name, 120), days: num(a?.days), is_active: a?.is_active === true, ads_count: num(a?.ads_count), collation_count: num(a?.collation_count), link_url: safe(a?.link_url, 200), host: safe(a?.host, 200), cta_text: safe(a?.cta_text, 60), title: safe(a?.title, 120), body: safe(a?.body, 240), platforms: Array.isArray(a?.platforms) ? a.platforms.filter((p) => typeof p === "string").slice(0, 8) : [] });
     // o endereço não passa pelo redactKeys: trecho reescrito viraria outra página; pageUrlArg recusa o que tiver senha ou chave
-    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, page_name: safe(r?.page_name, 120), start_date: num(r?.start_date), days: num(r?.days), ads_active: num(r?.ads_active), marketplace: r?.marketplace === true });
+    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, page_name: safe(r?.page_name, 120), start_date: num(r?.start_date), days: num(r?.days), ads_active: num(r?.ads_active), marketplace: r?.marketplace === true, category: safe(r?.category, 40), hits: num(r?.hits) });
+    // 0.25.0 (onda 31a.1): o que o site deixou fora das referências, com o motivo fechado em dois valores
+    const slimDropped = (r) => ({ host: safe(r?.host, 200), page_name: safe(r?.page_name, 120), reason: r?.reason === "marketplace" ? "marketplace" : "sem o produto" });
     try {
       const res = await api(`/api/stores/${id}/spy`, { method: "POST", body, timeoutMs: 270_000 });
       const pick = { ok: res.ok === true, estimate_usd: num(res.estimate_usd), runs_left: num(res.runs_left), quote: safe(res.quote, 120), quote_expires_at: safe(res.quote_expires_at, 40), run_id: safe(res.run_id, 40) };
       if (Array.isArray(res.references)) pick.references = res.references.slice(0, 5).map(slimRef).filter((r) => r.link_url);
-      if (res.searched && typeof res.searched === "object") pick.searched = { terms: Array.isArray(res.searched.terms) ? res.searched.terms.map((t) => safe(t, 60)) : [], country: safe(res.searched.country, 2) };
+      if (Array.isArray(res.dropped)) pick.dropped = res.dropped.slice(0, 10).map(slimDropped);
+      if (res.searched && typeof res.searched === "object") pick.searched = { terms: Array.isArray(res.searched.terms) ? res.searched.terms.map((t) => safe(t, 60)) : [], country: safe(res.searched.country, 2), tokens: Array.isArray(res.searched.tokens) ? res.searched.tokens.filter((t) => typeof t === "string").slice(0, 12).map((t) => safe(t, 30)) : [] };
       // gate r1: resposta de ferramenta tem teto no Claude Code. Os anúncios mais antigos ficam; o corte vai dito em items_cut
       if (Array.isArray(res.items)) {
         const all = res.items.slice(0, 200).map(slimItem).sort((a, b) => (b.days ?? -1) - (a.days ?? -1));

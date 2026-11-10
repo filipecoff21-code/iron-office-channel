@@ -1721,7 +1721,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
   check("45a ads_status: descrição com 1 | 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("1 | 7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → versão atual", init?.serverInfo?.version === "0.24.1", JSON.stringify(init?.serverInfo));
+  check("45a initialize → versão atual", init?.serverInfo?.version === "0.25.0", JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1769,7 +1769,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ads = tools.find((t) => t.name === "ads_status");
   check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
   check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
-  check("45b initialize → versão atual", init?.serverInfo?.version === "0.24.1", JSON.stringify(init?.serverInfo));
+  check("45b initialize → versão atual", init?.serverInfo?.version === "0.25.0", JSON.stringify(init?.serverInfo));
   call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
   call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
   call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
@@ -2018,7 +2018,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 
   let s = await sessao(base());
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.24.1" && (init?.instructions ?? "").length === BLOCO_ATUAL, String((init?.instructions ?? "").length));
+  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.25.0" && (init?.instructions ?? "").length === BLOCO_ATUAL, String((init?.instructions ?? "").length));
   await manda(msg("e0", "Sim", { answer: { question_id: "q", option_id: "a" } }));
   await manda(msg("e1", "ação feita", { system: "action" }));
   check("49 linha: resposta de botão não leva e não gasta a vez", !texto(s, "e0").includes("[primeira conversa"), texto(s, "e0"));
@@ -2432,6 +2432,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
       bodies.push(c.body);
       if (c.body?.terms?.[0] === "sem chave") return { status: 402, json: { ok: false, reason: "sem apify", error: "Conecte o Apify." } };
       if (c.body?.terms?.[0] === "grande") return { json: { ok: true, run_id: "r2", items: Array.from({ length: 200 }, (_, i) => ({ page_name: "L".repeat(120), days: i, is_active: true, link_url: "https://x.com/" + "p".repeat(180), host: "x.com", title: "t".repeat(120), body: "b".repeat(240), cta_text: "c".repeat(60), platforms: ["facebook"] })), references: [{ host: "a.com", link_url: "https://a.com/?token=abcdefghijklmnopqrstuvwxyz123456", days: 1 }, { host: "b.com", link_url: "https://b.com/p", days: 2 }] } };
+      if (c.body?.terms?.[0] === "regiao") return { json: { ok: true, run_id: "r3", items: [], references: [{ host: "wolf.com.br", link_url: "https://wolf.com.br/p", page_name: "Wolf", start_date: 1700000000, days: 150, ads_active: 2, marketplace: false, category: "Shoes", hits: 2 }], dropped: [...Array.from({ length: 11 }, (_, i) => ({ host: `d${i}.com`, page_name: `D${i}`, reason: i === 0 ? "marketplace" : "sem o produto", segredo: "nao-passa" })), { host: "x.com", page_name: "X", reason: "<b>estranho</b>" }].reverse(), searched: { terms: ["bota"], country: "CO", tokens: Array.from({ length: 15 }, (_, i) => `tok${i}`) } } };
       if (c.body?.terms?.[0] === "demora") return { status: 408, json: { ok: false, reason: "demorou", error: "Demorou." } };
       if (c.body?.dry_run) return { json: { ok: true, dry_run: true, estimate_usd: 0.0751, runs_today: 1, runs_left: 9, quote: "1800000000000.QQ", quote_expires_at: "2026-11-10T00:00:00Z", token_apify: "nao-passa" } };
       const items = Array.from({ length: 205 }, (_, i) => ({ page_name: `Loja ${i}`, start_date: 1700000000, days: 90, is_active: true, link_url: "https://tuyo.com.br/p", host: "tuyo.com.br", body: "oferta", image: "https://cdn/x.jpg", segredo: "nao-passa" }));
@@ -2477,10 +2478,18 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const big = JSON.parse(txt(s, 20) || "{}");
   check("31a r1: 200 anúncios grandes cabem em 30 mil caracteres, ficam os mais antigos e o corte é dito", txt(s, 20).length <= 30000 && big.items?.length > 0 && big.items[0].days === 199 && big.items_cut === 200 - big.items.length, `${txt(s, 20).length} ${big.items_cut}`);
   check("31a r1: endereço com chave não vira referência; o bom passa inteiro", big.references?.length === 1 && big.references[0].link_url === "https://b.com/p", JSON.stringify(big.references));
+  // onda 31a.1: category e hits na referência, dropped cortado em 10 com motivo fechado, tokens em 12
+  call(s, 21, "spy_run", { project_id: LOJA, terms: ["regiao"], country: "CO", quote: "q" });
+  await sleep(500);
+  const reg = JSON.parse(txt(s, 21) || "{}");
+  check("31a.1: referência passa category e hits", reg.references?.[0]?.category === "Shoes" && reg.references?.[0]?.hits === 2, JSON.stringify(reg.references));
+  check("31a.1: dropped cortado em 10, motivo estranho vira 'sem o produto', campo estranho fora", reg.dropped?.length === 10 && reg.dropped[0].host === "x.com" && reg.dropped[0].reason === "sem o produto" && reg.dropped.every((x) => x.reason === "marketplace" || x.reason === "sem o produto") && !txt(s, 21).includes("nao-passa") && !txt(s, 21).includes("estranho"), JSON.stringify(reg.dropped?.slice(0, 2)));
+  check("31a.1: searched.tokens cortado em 12", reg.searched?.tokens?.length === 12 && reg.searched.country === "CO", JSON.stringify(reg.searched));
+  check("31a.1: descrição cita um país por chamada, sem marca nem modelo e dropped", /Um país por chamada/.test(d) && /sem marca nem nome de modelo/.test(d) && /`dropped`/.test(d) && d.length <= 1600, String(d.length));
   check("31a: 402 do site vira sem apify", /"reason":"sem apify"/.test(txt(s, 5)), txt(s, 5));
   check("31a: 408 vira demorou", /"reason":"demorou"/.test(txt(s, 6)), txt(s, 6));
   check("31a: telefone no termo vira [removido]", bodies.some((b) => b.terms?.[0]?.includes("[removido]")) && !JSON.stringify(bodies).includes("91234"), JSON.stringify(bodies.at(-1)));
-  check("31a: dry_run em texto, país minúsculo e loja inválida recusam sem rede", /dry_run tem que ser/.test(txt(s, 8)) && /country/.test(txt(s, 9)) && /project_id inválido/.test(txt(s, 10)) && bodies.length === 6, String(bodies.length));
+  check("31a: dry_run em texto, país minúsculo e loja inválida recusam sem rede", /dry_run tem que ser/.test(txt(s, 8)) && /country/.test(txt(s, 9)) && /project_id inválido/.test(txt(s, 10)) && bodies.length === 7, String(bodies.length));
 
   const ref = { project_id: LOJA, title: "Tuyo", kind: "referencia", url: "https://tuyo.com.br/oferta" };
   call(s, 11, "page_save", { ...ref, note: "n".repeat(161) });

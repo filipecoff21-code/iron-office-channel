@@ -17149,7 +17149,7 @@ function porteiroAskCheck(text2, options) {
 }
 
 // src/server.mjs
-var VERSION = "0.24.1";
+var VERSION = "0.25.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
@@ -17758,7 +17758,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "spy_run",
-    description: "Pede ao Iron Office pra rodar a Biblioteca de An\xFAncios da Meta no Apify com a chave do aluno (skill `espiar`; a chave fica no servidor, nunca pe\xE7a nem use APIFY_TOKEN). Sempre primeiro com `dry_run: true`: devolve `estimate_usd`, `runs_left` e `quote` (vale 15 min). Depois o `ask` 'Vai custar \u2248 US$ X na sua conta do Apify. Procuro?' (Sim / N\xE3o). S\xF3 no Sim, chame de novo com o mesmo pedido e o `quote`: devolve `items` (an\xFAncios enxutos: anunciante, dias no ar, destino, texto) e `references` (at\xE9 5 p\xE1ginas pra estudar, j\xE1 filtradas). Respostas `{ ok: false, reason }`: `sem apify` (mande os 3 passos: Integra\xE7\xF5es \u2192 Apify \u2192 colar o token), `sem or\xE7amento`, `limite do dia`, `sem cr\xE9dito no Apify`, `chave inv\xE1lida`, `muitas seguidas`, `demorou` (pode ter cobrado; tente com menos an\xFAncios), `apify fora`, `sem resposta`. O `quote` vale uma rodada: tentar de novo \xE9 custo e sim de novo. S\xF3 na sess\xE3o aberta com ironoffice.",
+    description: "Pede ao Iron Office pra rodar a Biblioteca de An\xFAncios da Meta no Apify com a chave do aluno (skill `espiar`; a chave fica no servidor, nunca pe\xE7a nem use APIFY_TOKEN). Um pa\xEDs por chamada: regi\xE3o com mais de um pa\xEDs = uma chamada por pa\xEDs (`dry_run` de cada um, um `quote` por pa\xEDs). `terms` na l\xEDngua do pa\xEDs, s\xF3 o tipo do produto e o uso, sem marca nem nome de modelo. Sempre primeiro com `dry_run: true`: devolve `estimate_usd`, `runs_left` e `quote` (vale 15 min). Depois o `ask` do custo (Sim / N\xE3o). S\xF3 no Sim, chame de novo com o mesmo pedido e o `quote`: devolve `items` (an\xFAncios enxutos), `references` (at\xE9 5 p\xE1ginas cujo an\xFAncio fala do produto, sem marketplace) e `dropped` (o que ficou de fora e por qu\xEA: diga ao aluno). Respostas `{ ok: false, reason }`: `sem apify` (mande os 3 passos: Integra\xE7\xF5es \u2192 Apify \u2192 colar o token), `sem or\xE7amento`, `limite do dia`, `sem cr\xE9dito no Apify`, `chave inv\xE1lida`, `muitas seguidas`, `demorou` (pode ter cobrado; tente com menos an\xFAncios), `apify fora`, `sem resposta`. O `quote` vale uma rodada: tentar de novo \xE9 custo e sim de novo. S\xF3 na sess\xE3o aberta com ironoffice.",
     inputSchema: {
       type: "object",
       properties: {
@@ -18217,12 +18217,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const safe = (v, max) => typeof v === "string" ? redactKeys(v, max).text : null;
     const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
     const slimItem = (a) => ({ page_name: safe(a?.page_name, 120), days: num(a?.days), is_active: a?.is_active === true, ads_count: num(a?.ads_count), collation_count: num(a?.collation_count), link_url: safe(a?.link_url, 200), host: safe(a?.host, 200), cta_text: safe(a?.cta_text, 60), title: safe(a?.title, 120), body: safe(a?.body, 240), platforms: Array.isArray(a?.platforms) ? a.platforms.filter((p) => typeof p === "string").slice(0, 8) : [] });
-    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, page_name: safe(r?.page_name, 120), start_date: num(r?.start_date), days: num(r?.days), ads_active: num(r?.ads_active), marketplace: r?.marketplace === true });
+    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, page_name: safe(r?.page_name, 120), start_date: num(r?.start_date), days: num(r?.days), ads_active: num(r?.ads_active), marketplace: r?.marketplace === true, category: safe(r?.category, 40), hits: num(r?.hits) });
+    const slimDropped = (r) => ({ host: safe(r?.host, 200), page_name: safe(r?.page_name, 120), reason: r?.reason === "marketplace" ? "marketplace" : "sem o produto" });
     try {
       const res = await api(`/api/stores/${id}/spy`, { method: "POST", body, timeoutMs: 27e4 });
       const pick2 = { ok: res.ok === true, estimate_usd: num(res.estimate_usd), runs_left: num(res.runs_left), quote: safe(res.quote, 120), quote_expires_at: safe(res.quote_expires_at, 40), run_id: safe(res.run_id, 40) };
       if (Array.isArray(res.references)) pick2.references = res.references.slice(0, 5).map(slimRef).filter((r) => r.link_url);
-      if (res.searched && typeof res.searched === "object") pick2.searched = { terms: Array.isArray(res.searched.terms) ? res.searched.terms.map((t) => safe(t, 60)) : [], country: safe(res.searched.country, 2) };
+      if (Array.isArray(res.dropped)) pick2.dropped = res.dropped.slice(0, 10).map(slimDropped);
+      if (res.searched && typeof res.searched === "object") pick2.searched = { terms: Array.isArray(res.searched.terms) ? res.searched.terms.map((t) => safe(t, 60)) : [], country: safe(res.searched.country, 2), tokens: Array.isArray(res.searched.tokens) ? res.searched.tokens.filter((t) => typeof t === "string").slice(0, 12).map((t) => safe(t, 30)) : [] };
       if (Array.isArray(res.items)) {
         const all = res.items.slice(0, 200).map(slimItem).sort((a, b) => (b.days ?? -1) - (a.days ?? -1));
         pick2.items = [];
