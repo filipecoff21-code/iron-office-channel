@@ -63,6 +63,17 @@ const SKILL = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // sobe o servidor MCP; devolve o processo, as linhas que ele escreveu e um send()
+// onda 31a: o único retoque do bloco desde a v0.17.0: o atalho do Spy e os encurtamentos que o fizeram caber
+const DESFAZ_31A = (l) => l
+  .replace("`reply` curto do que fará, execute,", "`reply` curto do que vai fazer, execute,")
+  .replace("chame como subagente (Agent, subagent_type = <agente>) e responda por `reply` ao terminar.", "chame esse agente como subagente (Agent, subagent_type = <agente>) e responda pelo `reply` quando terminar.")
+  .replace(" `usa o iron-spy:`/'quem já vende X' → `espiar` (delegue só depois do `spy_run`).", "")
+  .replace("Resultado longo (relatório, auditoria, spy, copy, plano)", "Resultado longo (relatório de subagente, auditoria, spy, copy longa, plano)")
+  .replace("o `reply` termina com a url. Auditoria", "o `reply` termina com a url devolvida. Auditoria")
+  .replace("Ferramenta da Meta ausente nesta sessão", "Ferramenta da Meta que não existe nesta sessão")
+  .replace("Só a sessão com `npx", "Só a sessão aberta com `npx");
+const BLOCO_ATUAL = 3897;
+
 function startServer(home, url, env = {}, cwd = undefined) {
   const p = spawn(process.execPath, [SERVER], {
     cwd,
@@ -1665,7 +1676,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     antigos = null;
   }
   const novos = ins.split("\n");
-  const difs = antigos ? novos.map((l, i) => (l === antigos[i] ? -1 : i)).filter((i) => i >= 0) : [];
+  const difs = antigos ? novos.map((l, i) => (DESFAZ_31A(l) === antigos[i] ? -1 : i)).filter((i) => i >= 0) : [];
   check("43 bloco: só o item 8 mudou; os outros 12 iguais aos da v0.15.0", !!antigos && antigos.length === 13 && novos.length === 13 && difs.length === 1 && novos[difs[0]].startsWith("Gatilho → skill"), antigos ? `linhas que mudaram: ${difs.join(",")}` : "não li a v0.15.0 pelo git");
   s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   await sleep(400);
@@ -1710,7 +1721,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
   check("45a ads_status: descrição com 1 | 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("1 | 7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → versão atual", init?.serverInfo?.version === "0.23.0", JSON.stringify(init?.serverInfo));
+  check("45a initialize → versão atual", init?.serverInfo?.version === "0.24.0", JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1721,7 +1732,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     antigos = null;
   }
   const novos = ins.split("\n");
-  check("45a bloco: os 13 itens iguais aos da v0.16.0, 3881 caracteres", !!antigos && antigos.length === 13 && novos.length === 13 && novos.every((l, i) => l === antigos[i]) && ins.length === 3881, `tamanho ${ins.length}`);
+  check("45a bloco: os 13 itens iguais aos da v0.16.0, 3881 caracteres", !!antigos && antigos.length === 13 && novos.length === 13 && novos.every((l, i) => DESFAZ_31A(l) === antigos[i]) && ins.length === BLOCO_ATUAL, `tamanho ${ins.length}`);
   s.p.kill();
   f.srv.close();
 }
@@ -1758,7 +1769,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ads = tools.find((t) => t.name === "ads_status");
   check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
   check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
-  check("45b initialize → versão atual", init?.serverInfo?.version === "0.23.0", JSON.stringify(init?.serverInfo));
+  check("45b initialize → versão atual", init?.serverInfo?.version === "0.24.0", JSON.stringify(init?.serverInfo));
   call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
   call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
   call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
@@ -1798,7 +1809,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     antigos = null;
   }
   const novos = ins.split("\n");
-  check("45b bloco: igual ao da v0.16.1, 3881 caracteres", !!antigos && novos.length === antigos.length && novos.every((l, i) => l === antigos[i]) && ins.length === 3881, `tamanho ${ins.length}`);
+  check("45b bloco: igual ao da v0.16.1, 3881 caracteres", !!antigos && novos.length === antigos.length && novos.every((l, i) => DESFAZ_31A(l) === antigos[i]) && ins.length === BLOCO_ATUAL, `tamanho ${ins.length}`);
   s.p.kill();
   f.srv.close();
 }
@@ -1932,7 +1943,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     antigos = null;
   }
   const novos = ins.split("\n");
-  check("45b.1 bloco: igual ao da v0.17.0, 3881 caracteres", !!antigos && novos.length === antigos.length && novos.every((l, i) => l === antigos[i]) && ins.length === 3881, `tamanho ${ins.length}`);
+  check("45b.1 bloco: igual ao da v0.17.0, 3881 caracteres", !!antigos && novos.length === antigos.length && novos.every((l, i) => DESFAZ_31A(l) === antigos[i]) && ins.length === BLOCO_ATUAL, `tamanho ${ins.length}`);
   s.p.kill();
   f.srv.close();
 }
@@ -2007,7 +2018,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 
   let s = await sessao(base());
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.23.0" && (init?.instructions ?? "").length === 3881, String((init?.instructions ?? "").length));
+  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.24.0" && (init?.instructions ?? "").length === BLOCO_ATUAL, String((init?.instructions ?? "").length));
   await manda(msg("e0", "Sim", { answer: { question_id: "q", option_id: "a" } }));
   await manda(msg("e1", "ação feita", { system: "action" }));
   check("49 linha: resposta de botão não leva e não gasta a vez", !texto(s, "e0").includes("[primeira conversa"), texto(s, "e0"));
@@ -2407,6 +2418,83 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
     const vis = /question exatamente "O Iron quer instalar (.+) \(repositório git\)\./.exec(rs)?.[1];
     check("54 r1: item com segredo: o Iron vê sem o segredo e o hash é do que ele vê (o servidor aceita o ask)", !rs.includes(tok) && !!vis && rs.includes(`pt-instalar-${hashOf(vis)}`));
   }
+}
+
+// ─── onda 31a: spy_run e referência no page_save (0.24.0) ───────────────────
+{
+  console.log("spy_run e page_save com referencia (0.24.0, onda 31a)");
+  const LOJA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", PG = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const bodies = [], pages = [];
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === `/api/stores/${LOJA}/pages` && c.method === "POST") { pages.push(c.body); return { status: 201, json: { page: { id: PG, status: "no_ar" } } }; }
+    if (c.path === `/api/stores/${LOJA}/spy` && c.method === "POST") {
+      bodies.push(c.body);
+      if (c.body?.terms?.[0] === "sem chave") return { status: 402, json: { ok: false, reason: "sem apify", error: "Conecte o Apify." } };
+      if (c.body?.terms?.[0] === "grande") return { json: { ok: true, run_id: "r2", items: Array.from({ length: 200 }, (_, i) => ({ page_name: "L".repeat(120), days: i, is_active: true, link_url: "https://x.com/" + "p".repeat(180), host: "x.com", title: "t".repeat(120), body: "b".repeat(240), cta_text: "c".repeat(60), platforms: ["facebook"] })), references: [{ host: "a.com", link_url: "https://a.com/?token=abcdefghijklmnopqrstuvwxyz123456", days: 1 }, { host: "b.com", link_url: "https://b.com/p", days: 2 }] } };
+      if (c.body?.terms?.[0] === "demora") return { status: 408, json: { ok: false, reason: "demorou", error: "Demorou." } };
+      if (c.body?.dry_run) return { json: { ok: true, dry_run: true, estimate_usd: 0.0751, runs_today: 1, runs_left: 9, quote: "1800000000000.QQ", quote_expires_at: "2026-11-10T00:00:00Z", token_apify: "nao-passa" } };
+      const items = Array.from({ length: 205 }, (_, i) => ({ page_name: `Loja ${i}`, start_date: 1700000000, days: 90, is_active: true, link_url: "https://tuyo.com.br/p", host: "tuyo.com.br", body: "oferta", image: "https://cdn/x.jpg", segredo: "nao-passa" }));
+      return { json: { ok: true, run_id: "r1", items, references: [{ host: "tuyo.com.br", link_url: "https://tuyo.com.br/p", page_name: "Tuyo", start_date: 1700000000, days: 90, ads_active: 3, marketplace: false, extra: "nao-passa" }], estimate_usd: 0.0751, searched: { terms: ["bota"], country: "BR" }, api_token: "nao-passa" } };
+    }
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+
+  const fora = startServer(casa(), f.url, {});
+  fora.handshake();
+  await sleep(1500);
+  call(fora, 2, "spy_run", { project_id: LOJA, terms: ["bota"], dry_run: true });
+  await sleep(400);
+  check("31a: spy_run fora do canal recusa, sem rede", /não roda o Spy/.test(txt(fora, 2)) && bodies.length === 0, txt(fora, 2));
+  fora.p.kill();
+
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+  call(s, 3, "spy_run", { project_id: LOJA, terms: ["bota"], dry_run: true });
+  call(s, 4, "spy_run", { project_id: LOJA, terms: ["bota"], quote: "1800000000000.QQ" });
+  call(s, 5, "spy_run", { project_id: LOJA, terms: ["sem chave"], dry_run: true });
+  call(s, 6, "spy_run", { project_id: LOJA, terms: ["demora"], quote: "q" });
+  call(s, 7, "spy_run", { project_id: LOJA, terms: ["bota (31) 91234-5678"], dry_run: true });
+  call(s, 8, "spy_run", { project_id: LOJA, terms: ["bota"], dry_run: "true" });
+  call(s, 9, "spy_run", { project_id: LOJA, terms: ["bota"], country: "br" });
+  call(s, 10, "spy_run", { project_id: "x", terms: ["bota"] });
+  await sleep(1200);
+  const tool = res(s, 2)?.tools?.find((t) => t.name === "spy_run");
+  const d = tool?.description ?? "";
+  check("31a: descrição cita dry_run, ask, quote e a proibição do APIFY_TOKEN", /dry_run/.test(d) && /`ask`/.test(d) && /`quote`/.test(d) && /nunca peça nem use APIFY_TOKEN/.test(d), d.slice(0, 120));
+  const dry = JSON.parse(txt(s, 3) || "{}");
+  check("31a: dry_run POSTa no /spy com dry_run true e devolve estimativa e quote", bodies[0]?.dry_run === true && dry.estimate_usd === 0.0751 && dry.quote === "1800000000000.QQ" && dry.runs_left === 9, txt(s, 3));
+  check("31a: campo estranho do dry_run não passa", !txt(s, 3).includes("nao-passa"));
+  const run = JSON.parse(txt(s, 4) || "{}");
+  check("31a: rodada com quote devolve items e references, com o quote no corpo", bodies[1]?.quote === "1800000000000.QQ" && run.ok === true && run.run_id === "r1" && run.references?.[0]?.ads_active === 3 && run.searched?.country === "BR", txt(s, 4).slice(0, 200));
+  check("31a: items cortados em 200, campo estranho e imagem fora", run.items?.length === 200 && !txt(s, 4).includes("nao-passa") && !("image" in (run.items?.[0] ?? {})) && run.items?.[0]?.page_name === "Loja 0");
+  call(s, 20, "spy_run", { project_id: LOJA, terms: ["grande"], quote: "q" });
+  await sleep(500);
+  const big = JSON.parse(txt(s, 20) || "{}");
+  check("31a r1: 200 anúncios grandes cabem em 60 mil caracteres, ficam os mais antigos e o corte é dito", txt(s, 20).length <= 60000 && big.items?.length > 0 && big.items[0].days === 199 && big.items_cut === 200 - big.items.length, `${txt(s, 20).length} ${big.items_cut}`);
+  check("31a r1: endereço com chave não vira referência; o bom passa inteiro", big.references?.length === 1 && big.references[0].link_url === "https://b.com/p", JSON.stringify(big.references));
+  check("31a: 402 do site vira sem apify", /"reason":"sem apify"/.test(txt(s, 5)), txt(s, 5));
+  check("31a: 408 vira demorou", /"reason":"demorou"/.test(txt(s, 6)), txt(s, 6));
+  check("31a: telefone no termo vira [removido]", bodies.some((b) => b.terms?.[0]?.includes("[removido]")) && !JSON.stringify(bodies).includes("91234"), JSON.stringify(bodies.at(-1)));
+  check("31a: dry_run em texto, país minúsculo e loja inválida recusam sem rede", /dry_run tem que ser/.test(txt(s, 8)) && /country/.test(txt(s, 9)) && /project_id inválido/.test(txt(s, 10)) && bodies.length === 6, String(bodies.length));
+
+  const ref = { project_id: LOJA, title: "Tuyo", kind: "referencia", url: "https://tuyo.com.br/oferta" };
+  call(s, 11, "page_save", { ...ref, note: "n".repeat(161) });
+  call(s, 12, "page_save", { ...ref, note: "n".repeat(160) });
+  call(s, 13, "page_save", { ...ref, note: "anuncia há\n94 dias" });
+  await sleep(800);
+  check("31a: page_save com nota de 161 é recusado, sem rede", /note: até 160/.test(txt(s, 11)) && pages.every((b) => (b.note ?? "").length <= 160), txt(s, 11));
+  check("31a: nota de 160 passa e vai no corpo, com kind referencia", pages[0]?.kind === "referencia" && pages[0]?.note?.length === 160, JSON.stringify(pages[0]).slice(0, 120));
+  check("31a: nota vira uma linha", pages[1]?.note === "anuncia há 94 dias", pages[1]?.note);
+  check("31a: referência não oferece o gate no passo seguinte", /próxima referência/.test(txt(s, 12)) && !/rode o gate/.test(txt(s, 12)), txt(s, 12));
+  const ins = s.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
+  check("31a: o bloco cita espiar e spy_run e cabe em 3900", /`espiar`/.test(ins) && /`spy_run`/.test(ins) && ins.length <= 3900, String(ins.length));
+  s.p.kill();
+  f.close?.();
 }
 
 for (const d of lixo) {
