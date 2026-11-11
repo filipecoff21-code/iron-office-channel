@@ -74,6 +74,9 @@ const DESFAZ_31A = (l) => l
   .replace("Só a sessão com `npx", "Só a sessão aberta com `npx");
 const BLOCO_ATUAL = 3897;
 
+// onda 55c: o teste não herda o que o lançador do ironoffice pôs no ambiente de quem roda
+delete process.env.IRON_OFFICE_CHROME;
+delete process.env.IRON_OFFICE_CHROME_EXT;
 function startServer(home, url, env = {}, cwd = undefined) {
   const p = spawn(process.execPath, [SERVER], {
     cwd,
@@ -703,7 +706,35 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const chromeNo = casa();
   writeFileSync(join(chromeNo, ".claude.json"), JSON.stringify({ cachedChromeExtensionInstalled: "true", claudeInChromeDefaultEnabled: true }));
   const b9 = await rodar(chromeNo);
-  check("Chrome desligado, ou instalado com valor que não é true: fora da lista", b8?.mcp_servers?.length === 0 && b9?.mcp_servers?.length === 0, JSON.stringify([b8?.mcp_servers, b9?.mcp_servers]));
+  // onda 55c: desligado no /chrome com a extensão vista = o marcador chrome-extensao (antes: nada); valor que não é true continua fora
+  check("Chrome desligado: só o marcador chrome-extensao; instalado com valor que não é true: fora da lista", JSON.stringify(b8?.mcp_servers) === JSON.stringify(["chrome-extensao"]) && b9?.mcp_servers?.length === 0, JSON.stringify([b8?.mcp_servers, b9?.mcp_servers]));
+
+  // onda 55c (0.26.0): claude-in-chrome só com as ferramentas na sessão; extensão vista sem elas = chrome-extensao
+  console.log("onda 55c: presença do Chrome diz a verdade");
+  const rodarEnv = async (home, env) => {
+    const f = await fakeOffice((c) => (c.path === "/api/chat/pull" ? { json: { dashboard_open: true, messages: [] } } : undefined));
+    const s = startServer(home, f.url, { IRON_OFFICE_CHANNEL: "1", ...env }, home);
+    s.handshake();
+    for (let i = 0; i < 100 && pres(f.calls).length === 0; i++) await sleep(20);
+    s.p.kill();
+    f.srv.close();
+    return pres(f.calls)[0]?.body?.mcp_servers;
+  };
+  const chromeCasa = (obj) => { const h = casa(); if (obj) writeFileSync(join(h, ".claude.json"), JSON.stringify(obj)); return h; };
+  const c1 = await rodarEnv(chromeCasa({}), { IRON_OFFICE_CHROME: "1" });
+  check("55c env IRON_OFFICE_CHROME=1 → só claude-in-chrome", JSON.stringify(c1) === JSON.stringify(["claude-in-chrome"]), JSON.stringify(c1));
+  const c2 = await rodarEnv(chromeCasa({ cachedChromeExtensionInstalled: true, claudeInChromeDefaultEnabled: true }), { IRON_OFFICE_CHROME: "0" });
+  check("55c env 0 + arquivo com os dois true → chrome-extensao (o lançador vence)", JSON.stringify(c2) === JSON.stringify(["chrome-extensao"]), JSON.stringify(c2));
+  const c3 = await rodarEnv(chromeCasa({ cachedChromeExtensionInstalled: true, claudeInChromeDefaultEnabled: true }), {});
+  check("55c sem env + cached true + defaultEnabled true → claude-in-chrome", JSON.stringify(c3) === JSON.stringify(["claude-in-chrome"]), JSON.stringify(c3));
+  const c4 = await rodarEnv(chromeCasa({ cachedChromeExtensionInstalled: true }), {});
+  check("55c sem env + cached true + defaultEnabled ausente → chrome-extensao", JSON.stringify(c4) === JSON.stringify(["chrome-extensao"]), JSON.stringify(c4));
+  const c5 = await rodarEnv(chromeCasa({}), { IRON_OFFICE_CHROME_EXT: "1" });
+  check("55c IRON_OFFICE_CHROME_EXT=1 sem cached → chrome-extensao", JSON.stringify(c5) === JSON.stringify(["chrome-extensao"]), JSON.stringify(c5));
+  const c6 = await rodarEnv(chromeCasa({ mcpServers: { "meta-ads": {} } }), {});
+  check("55c nada → nenhum dos dois", JSON.stringify(c6) === JSON.stringify(["meta-ads"]), JSON.stringify(c6));
+  const c7 = await rodarEnv(chromeCasa({ mcpServers: Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`k${i}`, {}])) }), { IRON_OFFICE_CHROME_EXT: "1" });
+  check("55c mais de 50: chrome-extensao entra antes do corte", c7?.length === 50 && c7[0] === "chrome-extensao", JSON.stringify(c7?.slice(0, 3)));
 }
 
 // ─── 13b. endereço padrão (0.6.0): sem IRON_OFFICE_URL, servidor, hook e dist apontam pra https://ironoffice.app ─
@@ -1721,7 +1752,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
   check("45a ads_status: descrição com 1 | 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("1 | 7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → versão atual", init?.serverInfo?.version === "0.25.0", JSON.stringify(init?.serverInfo));
+  check("45a initialize → versão atual", init?.serverInfo?.version === "0.26.0", JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1769,7 +1800,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ads = tools.find((t) => t.name === "ads_status");
   check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
   check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
-  check("45b initialize → versão atual", init?.serverInfo?.version === "0.25.0", JSON.stringify(init?.serverInfo));
+  check("45b initialize → versão atual", init?.serverInfo?.version === "0.26.0", JSON.stringify(init?.serverInfo));
   call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
   call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
   call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
@@ -2018,7 +2049,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 
   let s = await sessao(base());
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.25.0" && (init?.instructions ?? "").length === BLOCO_ATUAL, String((init?.instructions ?? "").length));
+  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.26.0" && (init?.instructions ?? "").length === BLOCO_ATUAL, String((init?.instructions ?? "").length));
   await manda(msg("e0", "Sim", { answer: { question_id: "q", option_id: "a" } }));
   await manda(msg("e1", "ação feita", { system: "action" }));
   check("49 linha: resposta de botão não leva e não gasta a vez", !texto(s, "e0").includes("[primeira conversa"), texto(s, "e0"));

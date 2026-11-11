@@ -17149,7 +17149,7 @@ function porteiroAskCheck(text2, options) {
 }
 
 // src/server.mjs
-var VERSION = "0.25.0";
+var VERSION = "0.26.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
@@ -18487,8 +18487,17 @@ function presenceOnce() {
   return presenceInFlight;
 }
 var MAX_MCP = 50;
-var MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "dropkiller"];
+var MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "chrome-extensao", "dropkiller"];
 var CHROME = "claude-in-chrome";
+var CHROME_EXT = "chrome-extensao";
+function chromeNames(user, env = process.env) {
+  const u = user && typeof user === "object" ? user : {};
+  const flag = env?.IRON_OFFICE_CHROME;
+  const visto = env?.IRON_OFFICE_CHROME_EXT === "1" || u.cachedChromeExtensionInstalled === true;
+  const ligado = flag === "1" || flag !== "0" && u.cachedChromeExtensionInstalled === true && u.claudeInChromeDefaultEnabled === true;
+  if (ligado) return [CHROME];
+  return visto ? [CHROME_EXT] : [];
+}
 function mcpKeys(obj) {
   const m = obj && typeof obj === "object" ? obj.mcpServers : null;
   return m && typeof m === "object" && !Array.isArray(m) ? Object.keys(m) : [];
@@ -18509,7 +18518,7 @@ function readJson(path) {
     return void 0;
   }
 }
-function mcpServerNames(home = homedir2(), cwd = process.cwd()) {
+function mcpServerNames(home = homedir2(), cwd = process.cwd(), env = process.env) {
   const user = readJson(join3(home, ".claude.json"));
   if (user === void 0) return null;
   const proj = user?.projects && typeof user.projects === "object" ? user.projects[cwd] : null;
@@ -18520,7 +18529,7 @@ function mcpServerNames(home = homedir2(), cwd = process.cwd()) {
   if (mcpJson === void 0) return null;
   const fromJson = mcpKeys(mcpJson).filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
   const off = new Set(strList(p.disabledMcpServers));
-  const chrome = user?.cachedChromeExtensionInstalled === true && user?.claudeInChromeDefaultEnabled !== false ? [CHROME] : [];
+  const chrome = chromeNames(user, env);
   const names = [.../* @__PURE__ */ new Set([...mcpKeys(user), ...mcpKeys(p), ...fromJson, ...chrome])].map((n) => n.trim()).filter((n) => n.length > 0 && n.length <= 64 && !off.has(n));
   names.sort((x, y) => Number(MCP_PRIORITY.includes(y)) - Number(MCP_PRIORITY.includes(x)));
   return names.slice(0, MAX_MCP);

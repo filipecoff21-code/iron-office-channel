@@ -15,7 +15,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.25.0";
+const VERSION = "0.26.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -1551,10 +1551,23 @@ function presenceOnce() {
 // Arquivo ausente conta como nada; quebrado (~/.claude.json ou .mcp.json, ex.: lido no meio de uma escrita)
 // devolve null e a presença sai sem o campo, pro site manter a lista anterior em vez de apagar.
 const MAX_MCP = 50;
-const MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "dropkiller"]; // o que o site mede entra antes do corte de 50 (onda 43: + dropkiller, cartão em Integrações)
+const MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "chrome-extensao", "dropkiller"]; // o que o site mede entra antes do corte de 50 (onda 43: + dropkiller, cartão em Integrações)
 // 0.8.0 (onda 27a): a extensão Claude in Chrome não mora em mcpServers; o Claude Code guarda 2 booleanos no
 // ~/.claude.json. Instalada e não desligada = o nome "claude-in-chrome" entra na lista (o cartão Chrome lê isso).
 const CHROME = "claude-in-chrome";
+// 0.26.0 (onda 55c): o nome "claude-in-chrome" só entra quando ESTA sessão tem as ferramentas do Chrome: o
+// `ironoffice` passou --chrome (IRON_OFFICE_CHROME=1) ou o aluno ligou "Enabled by default" no /chrome (o booleano
+// em true, não só "nunca definido"). Extensão vista sem as ferramentas = o marcador "chrome-extensao" (o cartão diz
+// "falta reabrir"). IRON_OFFICE_CHROME=0 vence o arquivo: o lançador sabe o que passou.
+const CHROME_EXT = "chrome-extensao";
+function chromeNames(user, env = process.env) {
+  const u = user && typeof user === "object" ? user : {};
+  const flag = env?.IRON_OFFICE_CHROME;
+  const visto = env?.IRON_OFFICE_CHROME_EXT === "1" || u.cachedChromeExtensionInstalled === true;
+  const ligado = flag === "1" || (flag !== "0" && u.cachedChromeExtensionInstalled === true && u.claudeInChromeDefaultEnabled === true);
+  if (ligado) return [CHROME];
+  return visto ? [CHROME_EXT] : [];
+}
 function mcpKeys(obj) {
   const m = obj && typeof obj === "object" ? obj.mcpServers : null;
   return m && typeof m === "object" && !Array.isArray(m) ? Object.keys(m) : [];
@@ -1575,7 +1588,7 @@ function readJson(path) {
     return undefined; // existe mas está quebrado
   }
 }
-function mcpServerNames(home = homedir(), cwd = process.cwd()) {
+function mcpServerNames(home = homedir(), cwd = process.cwd(), env = process.env) {
   const user = readJson(join(home, ".claude.json"));
   if (user === undefined) return null;
   const proj = user?.projects && typeof user.projects === "object" ? user.projects[cwd] : null;
@@ -1587,7 +1600,7 @@ function mcpServerNames(home = homedir(), cwd = process.cwd()) {
   const fromJson = mcpKeys(mcpJson)
     .filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
   const off = new Set(strList(p.disabledMcpServers));
-  const chrome = user?.cachedChromeExtensionInstalled === true && user?.claudeInChromeDefaultEnabled !== false ? [CHROME] : [];
+  const chrome = chromeNames(user, env);
   const names = [...new Set([...mcpKeys(user), ...mcpKeys(p), ...fromJson, ...chrome])]
     .map((n) => n.trim())
     .filter((n) => n.length > 0 && n.length <= 64 && !off.has(n));

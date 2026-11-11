@@ -60,6 +60,8 @@ Prefira `npx iron-edge office`, que faz isso tudo e confere cada passo.
 - Chave inválida: avisa uma vez no terminal e tenta de novo depois de 5 minutos.
 - Pra testar contra um servidor local: `IRON_OFFICE_URL=http://localhost:3000`.
 
+**0.26.0 (onda 55c):** a presença só manda `claude-in-chrome` quando esta sessão tem as ferramentas do Chrome: o `ironoffice` passou `--chrome` (`IRON_OFFICE_CHROME=1`) ou o aluno ligou "Enabled by default" no `/chrome` (`claudeInChromeDefaultEnabled` em `true`, não só ausente). Extensão vista sem as ferramentas vira o marcador `chrome-extensao` (o cartão diz "falta reabrir"); `IRON_OFFICE_CHROME=0` vence o arquivo.
+
 **0.25.0 (onda 31a.1):** o `spy_run` é um país por chamada (região com mais de um país = uma chamada por país, cada uma com o seu `dry_run` e o seu `quote`), com termos na língua do país e sem marca nem nome de modelo. A resposta traz `references` só com as páginas cujo anúncio fala do produto (com `category` e `hits`), sem marketplace, e `dropped` (até 10, motivo `marketplace` ou `sem o produto`) pro Iron dizer ao aluno o que ficou de fora; `searched.tokens` mostra as palavras que o site usou pra filtrar.
 
 **0.24.0 (onda 31a):** ferramenta `spy_run`: pede ao site pra rodar a Biblioteca de Anúncios no Apify com a chave do aluno, que fica cifrada no servidor e nunca passa por aqui. Sempre `dry_run` primeiro, `ask` com o custo e a rodada só com o `quote`. O `page_save` aceita `kind: "referencia"` e `note` (até 160), pras Referências do nicho da aba Páginas. Na 0.24.1, a resposta do `spy_run` cabe em 30 mil caracteres (a de 54 mil passou do teto de ferramenta do Claude Code).
