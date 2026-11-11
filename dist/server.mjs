@@ -17149,7 +17149,7 @@ function porteiroAskCheck(text2, options) {
 }
 
 // src/server.mjs
-var VERSION = "0.26.0";
+var VERSION = "0.26.1";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
@@ -18487,16 +18487,21 @@ function presenceOnce() {
   return presenceInFlight;
 }
 var MAX_MCP = 50;
-var MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "chrome-extensao", "dropkiller"];
+var MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "chrome-off-flag", "chrome-off-config", "chrome-claude-antigo", "chrome-sem-ajuda", "chrome-extensao", "dropkiller"];
 var CHROME = "claude-in-chrome";
 var CHROME_EXT = "chrome-extensao";
+var CHROME_MOTIVO = { flag: "chrome-off-flag", config: "chrome-off-config", antigo: "chrome-claude-antigo", ajuda: "chrome-sem-ajuda" };
 function chromeNames(user, env = process.env) {
   const u = user && typeof user === "object" ? user : {};
   const flag = env?.IRON_OFFICE_CHROME;
   const visto = env?.IRON_OFFICE_CHROME_EXT === "1" || u.cachedChromeExtensionInstalled === true;
   const ligado = flag === "1" || flag !== "0" && u.cachedChromeExtensionInstalled === true && u.claudeInChromeDefaultEnabled === true;
   if (ligado) return [CHROME];
-  return visto ? [CHROME_EXT] : [];
+  if (!visto) return [];
+  const motivo = env?.IRON_OFFICE_CHROME_MOTIVO;
+  if (flag === "0" && Object.hasOwn(CHROME_MOTIVO, motivo)) return [CHROME_MOTIVO[motivo]];
+  if (flag === void 0 && u.claudeInChromeDefaultEnabled === false) return [CHROME_MOTIVO.config];
+  return [CHROME_EXT];
 }
 function mcpKeys(obj) {
   const m = obj && typeof obj === "object" ? obj.mcpServers : null;

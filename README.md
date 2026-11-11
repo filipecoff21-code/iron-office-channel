@@ -60,6 +60,8 @@ Prefira `npx iron-edge office`, que faz isso tudo e confere cada passo.
 - Chave inválida: avisa uma vez no terminal e tenta de novo depois de 5 minutos.
 - Pra testar contra um servidor local: `IRON_OFFICE_URL=http://localhost:3000`.
 
+**0.26.1 (onda 55c.1):** com a extensão vista e a sessão sem o Chrome, a presença manda UM marcador pelo motivo que o lançador contou em `IRON_OFFICE_CHROME_MOTIVO` (lista fechada): `chrome-off-flag` (`--sem-chrome`/`--no-chrome`), `chrome-off-config` (desligado no `/chrome`; também sem variável do lançador e `claudeInChromeDefaultEnabled` em `false`), `chrome-claude-antigo` e `chrome-sem-ajuda`. Sem motivo, ou motivo fora da lista, continua `chrome-extensao`. O cartão Chrome do site mostra o passo de cada um.
+
 **0.26.0 (onda 55c):** a presença só manda `claude-in-chrome` quando esta sessão tem as ferramentas do Chrome: o `ironoffice` passou `--chrome` (`IRON_OFFICE_CHROME=1`) ou o aluno ligou "Enabled by default" no `/chrome` (`claudeInChromeDefaultEnabled` em `true`, não só ausente). Extensão vista sem as ferramentas vira o marcador `chrome-extensao` (o cartão diz "falta reabrir"); `IRON_OFFICE_CHROME=0` vence o arquivo.
 
 **0.25.0 (onda 31a.1):** o `spy_run` é um país por chamada (região com mais de um país = uma chamada por país, cada uma com o seu `dry_run` e o seu `quote`), com termos na língua do país e sem marca nem nome de modelo. A resposta traz `references` só com as páginas cujo anúncio fala do produto (com `category` e `hits`), sem marketplace, e `dropped` (até 10, motivo `marketplace` ou `sem o produto`) pro Iron dizer ao aluno o que ficou de fora; `searched.tokens` mostra as palavras que o site usou pra filtrar.

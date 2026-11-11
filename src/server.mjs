@@ -15,7 +15,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.26.0";
+const VERSION = "0.26.1";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -1551,7 +1551,7 @@ function presenceOnce() {
 // Arquivo ausente conta como nada; quebrado (~/.claude.json ou .mcp.json, ex.: lido no meio de uma escrita)
 // devolve null e a presença sai sem o campo, pro site manter a lista anterior em vez de apagar.
 const MAX_MCP = 50;
-const MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "chrome-extensao", "dropkiller"]; // o que o site mede entra antes do corte de 50 (onda 43: + dropkiller, cartão em Integrações)
+const MCP_PRIORITY = ["meta-ads", "claude-in-chrome", "chrome-off-flag", "chrome-off-config", "chrome-claude-antigo", "chrome-sem-ajuda", "chrome-extensao", "dropkiller"]; // o que o site mede entra antes do corte de 50 (onda 43: + dropkiller, cartão em Integrações)
 // 0.8.0 (onda 27a): a extensão Claude in Chrome não mora em mcpServers; o Claude Code guarda 2 booleanos no
 // ~/.claude.json. Instalada e não desligada = o nome "claude-in-chrome" entra na lista (o cartão Chrome lê isso).
 const CHROME = "claude-in-chrome";
@@ -1560,13 +1560,21 @@ const CHROME = "claude-in-chrome";
 // em true, não só "nunca definido"). Extensão vista sem as ferramentas = o marcador "chrome-extensao" (o cartão diz
 // "falta reabrir"). IRON_OFFICE_CHROME=0 vence o arquivo: o lançador sabe o que passou.
 const CHROME_EXT = "chrome-extensao";
+// 0.26.1 (onda 55c.1): com a extensão vista e a sessão sem o Chrome, UM marcador pelo motivo que o lançador mandou
+// (IRON_OFFICE_CHROME_MOTIVO, lista fechada). Valor fora da lista = chrome-extensao (nunca vira nome de marcador).
+// Sem variável do lançador (lançador antigo) e claudeInChromeDefaultEnabled === false = chrome-off-config.
+const CHROME_MOTIVO = { flag: "chrome-off-flag", config: "chrome-off-config", antigo: "chrome-claude-antigo", ajuda: "chrome-sem-ajuda" };
 function chromeNames(user, env = process.env) {
   const u = user && typeof user === "object" ? user : {};
   const flag = env?.IRON_OFFICE_CHROME;
   const visto = env?.IRON_OFFICE_CHROME_EXT === "1" || u.cachedChromeExtensionInstalled === true;
   const ligado = flag === "1" || (flag !== "0" && u.cachedChromeExtensionInstalled === true && u.claudeInChromeDefaultEnabled === true);
   if (ligado) return [CHROME];
-  return visto ? [CHROME_EXT] : [];
+  if (!visto) return [];
+  const motivo = env?.IRON_OFFICE_CHROME_MOTIVO;
+  if (flag === "0" && Object.hasOwn(CHROME_MOTIVO, motivo)) return [CHROME_MOTIVO[motivo]];
+  if (flag === undefined && u.claudeInChromeDefaultEnabled === false) return [CHROME_MOTIVO.config];
+  return [CHROME_EXT];
 }
 function mcpKeys(obj) {
   const m = obj && typeof obj === "object" ? obj.mcpServers : null;
