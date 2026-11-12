@@ -17149,7 +17149,7 @@ function porteiroAskCheck(text2, options) {
 }
 
 // src/server.mjs
-var VERSION = "0.26.1";
+var VERSION = "0.27.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
@@ -17286,6 +17286,7 @@ function storePrefix(store) {
 }
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var PAGE_KINDS = ["landing", "clone", "shopify", "outra", "referencia"];
+var ASK_LINKS = ["dropkiller", "shopify"];
 var SPY_RESPONSE_MAX = 3e4;
 function pageUrlArg(v) {
   if (typeof v !== "string") return null;
@@ -17301,6 +17302,34 @@ function pageUrlArg(v) {
   if (u.protocol !== "http:" && u.protocol !== "https:" || u.username || u.password || u.port !== "") return null;
   if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(u.hostname)) return null;
   return u.href.length <= 500 ? u.href : null;
+}
+var CARD_LINK_KEYS = ["ad_url", "page_url"];
+function cardLinks(rawCard) {
+  if (!rawCard || typeof rawCard !== "object" || Array.isArray(rawCard) || !Array.isArray(rawCard.items)) return { card: rawCard, links: [], dropped: [] };
+  const links = [];
+  const dropped = [];
+  const items = rawCard.items.map((it, i) => {
+    if (!it || typeof it !== "object" || Array.isArray(it)) {
+      links.push(null);
+      return it;
+    }
+    const rest = { ...it };
+    const l = {};
+    for (const k of CARD_LINK_KEYS) {
+      const had = rest[k] !== void 0 && rest[k] !== null && rest[k] !== "";
+      const ok = pageUrlArg(rest[k]);
+      delete rest[k];
+      if (ok) l[k] = ok;
+      else if (had) dropped.push(`item ${i + 1}: ${k}`);
+    }
+    links.push(l);
+    return rest;
+  });
+  return { card: { ...rawCard, items }, links, dropped };
+}
+function cardWithLinks(card, links) {
+  if (!card || typeof card !== "object" || !Array.isArray(card.items) || !links.length) return card;
+  return { ...card, items: card.items.map((it, i) => it && typeof it === "object" && !Array.isArray(it) && links[i] ? { ...it, ...links[i] } : it) };
 }
 function localPathArg(v) {
   const s = String(v).trim();
@@ -17575,7 +17604,7 @@ var INSTRUCTIONS = DEGRADED ? [
   "Resultado longo (relat\xF3rio, auditoria, spy, copy, plano): `deliver` com t\xEDtulo, agente e conte\xFAdo completo ANTES do `reply`; o `reply` termina com a url. Auditoria/Spy: o JSON do bloco `## Cart\xE3o` vai em `card`, sem reescrever, e a p\xE1gina auditada em `url`; o `reply` vira 1\u20132 linhas + url.",
   "P\xE1gina terminada (lp-cinematico, iron-clone, p\xE1gina da Shopify fora do produto): `page_save` com t\xEDtulo, tipo e a URL (no ar) ou a pasta (rascunho). Quem publica \xE9 o aluno, nunca voc\xEA.",
   "Loja: a 1\xAA linha `[loja: \u2026]` \xE9 a loja ativa do aluno; se tem ficha, leia-a antes de responder; se diz `ficha: ainda sem ficha` e o pedido \xE9 da loja, ofere\xE7a em 1 linha montar a ficha (skill `loja`) e espere o sim. O iron-shopify usa `shop_status` e `shop_query` deste plugin, nunca `curl`. Leituras, `reply` e `deliver` v\xE3o pra loja da \xFAltima mensagem; mutation leva sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: \u2026]`).",
-  "Gatilho \u2192 skill, ANTES de agir: `an\xFAncios: atualizar` ou 'como est\xE3o meus an\xFAncios' \u2192 `anuncios`; imagem ('gera uma imagem', 'varia\xE7\xE3o da imagem <id>', 'sobe/tira essa da Shopify') \u2192 `imagens`; `trilha: <etapa>` ou 'continuar a trilha' \u2192 `trilha`; 'o que est\xE1 vendendo em <pa\xEDs>', 'minerar', 'produto vencedor' \u2192 `minerar`; p\xE1gina de vendas na l\xF3gica de uma refer\xEAncia ('quero vender como esta p\xE1gina'), p\xE1gina pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido \u2192 `office-fluxos`.",
+  "Gatilho \u2192 skill, ANTES de agir: `an\xFAncios: atualizar` ou 'como est\xE3o meus an\xFAncios' \u2192 `anuncios`; imagem ('gera uma imagem', 'varia\xE7\xE3o da imagem <id>', 'sobe/tira essa da Shopify') \u2192 `imagens`; `trilha: <etapa>` ou 'continuar a trilha' \u2192 `trilha`; 'o que est\xE1 vendendo em <pa\xEDs>', 'minerar', 'produto vencedor' \u2192 `minerar`; p\xE1gina na l\xF3gica de uma refer\xEAncia ('quero vender como esta p\xE1gina'), p\xE1gina pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido, criar loja \u2192 `office-fluxos`.",
   "Ferramenta da Meta ausente nesta sess\xE3o, ou pedido `/mcp`: responda os 3 passos (no terminal: `/mcp` \u2192 `meta-ads` \u2192 entrar com o Facebook; depois fechar e abrir o `ironoffice`), nunca 'n\xE3o funciona aqui'.",
   "Pergunta ao aluno \xE9 `ask`: UMA por mensagem, com op\xE7\xF5es (at\xE9 6) e `skip`; espere a resposta. Vale pra sim/n\xE3o, oferta de UMA a\xE7\xE3o e CAMINHOS ('A ou B', uma op\xE7\xE3o por caminho): o aluno clica, n\xE3o digita comando. Um `reply` NUNCA termina com pergunta nem com '\xE9 s\xF3 responder X', 'escreve X', 'me diga X': se precisa de resposta, a \xFAltima chamada da rodada \xE9 uma `ask`. Dados que faltam, do aluno OU do fornecedor: UM formul\xE1rio (`ask` com `fields`, at\xE9 12); o que ele pular vira 'dado pendente'; nunca 'me manda depois' sem formul\xE1rio.",
   "LOTE: duas ou mais tags antes de responder = cada uma tem a sua resposta, na ordem; 'Pular' recebe 1 linha. O retorno das ferramentas avisa mensagem sem resposta e passo pendente: n\xE3o encerre a rodada com aviso em aberto.",
@@ -17624,7 +17653,7 @@ var TOOLS = DEGRADED ? [
         type: { type: "string", description: "Opcional: tipo da entrega (auditoria, relatorio, copy, plano\u2026). Vira etiqueta." },
         card: {
           type: "object",
-          description: "Opcional: o JSON do bloco `## Cart\xE3o` que o agente devolveu, sem reescrever: { kind, score, summary, items: [{ title, why, effort, action }] }."
+          description: "Opcional: o JSON do bloco `## Cart\xE3o` que o agente devolveu, sem reescrever: { kind, score, summary, items: [{ title, why, effort, action, ad_url?, page_url? }] }; `ad_url` = o an\xFAncio (ou a busca) na Biblioteca de An\xFAncios, `page_url` = a p\xE1gina de vendas; os dois s\xF3 `https://`."
         },
         project_id: { type: "string", description: "Opcional: id da loja da entrega. Sem ele, a loja da \xFAltima mensagem." },
         url: { type: "string", description: "Opcional: a URL da p\xE1gina auditada ou entregue (https://\u2026); o site liga a entrega \xE0 p\xE1gina na aba P\xE1ginas." },
@@ -17651,7 +17680,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "ask",
-    description: "Faz UMA pergunta ao aluno no chat do Iron Office, com bot\xF5es de op\xE7\xE3o (at\xE9 6), campo livre e 'Pular'; OU um formul\xE1rio (`fields`, at\xE9 12 campos, cada um com 'Pular este' e um bot\xE3o 'Enviar respostas'). O clique do aluno chega como mensagem normal do canal (formul\xE1rio: 'r\xF3tulo: valor' por linha). S\xF3 na sess\xE3o do canal. Uma pergunta (ou um formul\xE1rio) por vez: espere a resposta antes da pr\xF3xima. Sim/n\xE3o, oferta de uma a\xE7\xE3o e caminhos ('A ou B') s\xE3o ask, nunca prosa. Dados que faltam, do aluno ou do fornecedor, v\xE3o em fields; o que ele pular vira 'dado pendente'. `link: \"dropkiller\"` acrescenta o bot\xE3o de assinar o DropKiller (s\xF3 nessa pergunta).",
+    description: "Faz UMA pergunta ao aluno no chat do Iron Office, com bot\xF5es de op\xE7\xE3o (at\xE9 6), campo livre e 'Pular'; OU um formul\xE1rio (`fields`, at\xE9 12 campos, cada um com 'Pular este' e um bot\xE3o 'Enviar respostas'). O clique do aluno chega como mensagem normal do canal (formul\xE1rio: 'r\xF3tulo: valor' por linha). S\xF3 na sess\xE3o do canal. Uma pergunta (ou um formul\xE1rio) por vez: espere a resposta antes da pr\xF3xima. Sim/n\xE3o, oferta de uma a\xE7\xE3o e caminhos ('A ou B') s\xE3o ask, nunca prosa. Dados que faltam, do aluno ou do fornecedor, v\xE3o em fields; o que ele pular vira 'dado pendente'. `link: \"dropkiller\"` acrescenta o bot\xE3o de assinar o DropKiller; `link: \"shopify\"`, o de criar a loja na Shopify (s\xF3 nessa pergunta).",
     inputSchema: {
       type: "object",
       properties: {
@@ -17669,7 +17698,7 @@ var TOOLS = DEGRADED ? [
           description: "Opcional: formul\xE1rio, 1 a 12 campos { id (a-z, 0-9, _; at\xE9 24), label (at\xE9 80), placeholder (at\xE9 60), kind: text | number | money | yesno }. Com fields, n\xE3o mande options.",
           items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, kind: { type: "string", enum: FIELD_KINDS } }, required: ["id", "label"] }
         },
-        link: { type: "string", enum: ["dropkiller"], description: "Opcional: chave de um bot\xE3o com link que o site conhece (hoje s\xF3 'dropkiller' = assinar o DropKiller com o link do Iron Office). Nunca uma URL." },
+        link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um bot\xE3o com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o bot\xE3o n\xE3o aparece, ent\xE3o o texto da pergunta tem que valer sozinho). Nunca uma URL." },
         project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da \xFAltima mensagem." }
       },
       required: ["chat_id", "question"]
@@ -17900,9 +17929,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const type = redactKeys(String(args.type ?? "").trim(), 80).text;
     const rawCard = args.card && typeof args.card === "object" && !Array.isArray(args.card) ? args.card : null;
     let card = null;
+    let linksFora = [];
     if (rawCard) {
+      const { card: semLinks, links, dropped } = cardLinks(rawCard);
+      linksFora = dropped;
       try {
-        card = JSON.parse(redactKeys(JSON.stringify(rawCard), DELIVER_MAX).text);
+        card = cardWithLinks(JSON.parse(redactKeys(JSON.stringify(semLinks), DELIVER_MAX).text), links);
       } catch {
         card = null;
       }
@@ -17929,7 +17961,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         trilhaP.clear();
       }
       formulario.clear();
-      return text(JSON.stringify({ id, url }) + pageIdNote + proximo);
+      const linksNote = linksFora.length ? ` Links do cart\xE3o ignorados (s\xF3 https://, sem senha, chave, porta ou aspas): ${linksFora.join(", ")}.` : "";
+      return text(JSON.stringify({ id, url }) + pageIdNote + linksNote + proximo);
     } catch (e) {
       return text(`Falhou ao salvar a entrega: ${e.message}`, true);
     }
@@ -17999,7 +18032,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
     const link = args.link;
-    if (link !== void 0 && (typeof link !== "string" || link !== "dropkiller")) return text("link: s\xF3 a chave 'dropkiller' existe hoje.", true);
+    if (link !== void 0 && (typeof link !== "string" || !ASK_LINKS.includes(link))) return text("link: s\xF3 as chaves 'dropkiller' e 'shopify' existem hoje.", true);
     if (raw.length > Q_OPTIONS_MAX) return text(`Op\xE7\xF5es demais (${raw.length}; m\xE1ximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;
@@ -18217,7 +18250,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const safe = (v, max) => typeof v === "string" ? redactKeys(v, max).text : null;
     const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
     const slimItem = (a) => ({ page_name: safe(a?.page_name, 120), days: num(a?.days), is_active: a?.is_active === true, ads_count: num(a?.ads_count), collation_count: num(a?.collation_count), link_url: safe(a?.link_url, 200), host: safe(a?.host, 200), cta_text: safe(a?.cta_text, 60), title: safe(a?.title, 120), body: safe(a?.body, 240), platforms: Array.isArray(a?.platforms) ? a.platforms.filter((p) => typeof p === "string").slice(0, 8) : [] });
-    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, page_name: safe(r?.page_name, 120), start_date: num(r?.start_date), days: num(r?.days), ads_active: num(r?.ads_active), marketplace: r?.marketplace === true, category: safe(r?.category, 40), hits: num(r?.hits) });
+    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, ad_library_url: typeof r?.ad_library_url === "string" ? pageUrlArg(r.ad_library_url) : null, page_name: safe(r?.page_name, 120), start_date: num(r?.start_date), days: num(r?.days), ads_active: num(r?.ads_active), marketplace: r?.marketplace === true, category: safe(r?.category, 40), hits: num(r?.hits) });
     const slimDropped = (r) => ({ host: safe(r?.host, 200), page_name: safe(r?.page_name, 120), reason: r?.reason === "marketplace" ? "marketplace" : "sem o produto" });
     try {
       const res = await api(`/api/stores/${id}/spy`, { method: "POST", body, timeoutMs: 27e4 });
@@ -18670,3 +18703,7 @@ if (!DEGRADED) {
     maybeStart();
   });
 }
+export {
+  cardLinks,
+  cardWithLinks
+};

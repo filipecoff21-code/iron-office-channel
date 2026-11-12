@@ -1,6 +1,6 @@
 ---
 name: office-fluxos
-description: Fluxos do Iron Office que não cabem nas instruções do canal. Carregar ANTES de agir quando o pedido do site for página de vendas na lógica de uma referência (trilha de persuasão), página pronta (gate por botão), dados que faltam (formulário), cancelar pedido, nota ou etiqueta de pedido, ou mensagem do sistema.
+description: Fluxos do Iron Office que não cabem nas instruções do canal. Carregar ANTES de agir quando o pedido do site for página de vendas na lógica de uma referência (trilha de persuasão), página pronta (gate por botão), dados que faltam (formulário), cancelar pedido, nota ou etiqueta de pedido, criar loja na Shopify, ou mensagem do sistema.
 ---
 
 # Fluxos do Iron Office
@@ -24,6 +24,10 @@ Perguntas ao aluno: UMA por mensagem, pela ferramenta `ask` com opções quando 
 Oferecer CAMINHOS ao aluno ('preencher as lacunas agora ou montar com o que tem', 'duplicar o tema ou editar a cópia que já existe', 'A ou B') é sempre `ask` com uma opção por caminho (até 6) e `skip`. Nunca prosa que pede pra ele digitar uma palavra-chave ('me diga X ou Y', 'responda montar'): o aluno clica, não digita comando.
 
 LOTE: se chegaram duas ou mais tags `<channel>` antes de você responder (clique em 'Pular' seguido de pedido novo; duas mensagens em 2 s), cada uma tem a sua resposta (`reply`, `ask`, ou `deliver` + `reply`), na ordem em que chegaram. Resposta ao 'Pular' é 1 linha; depois trate a próxima. O retorno do `reply`/`ask` avisa quando ainda há mensagem sem resposta nesta conversa: não encerre a rodada com esse aviso em aberto.
+
+## Criar a loja na Shopify
+
+'Quero criar minha loja', 'criar a Shopify', 'criar outra loja', 'segunda loja', ou a etapa `loja` sem Shopify: UMA `ask` com `link: "shopify"` (o site desenha o botão 'Criar minha loja na Shopify') e as opções 'Já criei a loja' · 'Agora não'. Sem o link configurado o botão some: o texto vale sozinho ('Crie a sua loja na Shopify e me diga quando terminar'), nunca só 'clique no botão abaixo', e nunca escreva URL. Clicar no botão não responde. 'Já criei': Integrações → cartão do projeto → 'Mudar pra Loja Shopify' e conectar (ou 'Conectar'). Projeto de cliente (`kind: cliente`): sem `link`. 'Outra loja' com a loja ativa já conectada: a pergunta diz antes, em 1 linha, que loja nova pede projeto novo (seletor de projeto → Novo projeto); você não cria projeto.
 
 ## Pedidos da Shopify com confirmação
 

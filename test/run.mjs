@@ -65,6 +65,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // sobe o servidor MCP; devolve o processo, as linhas que ele escreveu e um send()
 // onda 31a: o único retoque do bloco desde a v0.17.0: o atalho do Spy e os encurtamentos que o fizeram caber
 const DESFAZ_31A = (l) => l
+  // onda 57 (0.27.0): o gatilho de criar loja (e o "de vendas" que saiu pra caber no teto)
+  .replace("cancelar pedido, nota ou etiqueta de pedido, criar loja → `office-fluxos`", "cancelar pedido, nota ou etiqueta de pedido → `office-fluxos`")
+  .replace("; página na lógica de uma referência ('quero vender", "; página de vendas na lógica de uma referência ('quero vender")
   .replace("`reply` curto do que fará, execute,", "`reply` curto do que vai fazer, execute,")
   .replace("chame como subagente (Agent, subagent_type = <agente>) e responda por `reply` ao terminar.", "chame esse agente como subagente (Agent, subagent_type = <agente>) e responda pelo `reply` quando terminar.")
   .replace(" `usa o iron-spy:`/'quem já vende X' → `espiar` (delegue só depois do `spy_run`).", "")
@@ -72,7 +75,8 @@ const DESFAZ_31A = (l) => l
   .replace("o `reply` termina com a url. Auditoria", "o `reply` termina com a url devolvida. Auditoria")
   .replace("Ferramenta da Meta ausente nesta sessão", "Ferramenta da Meta que não existe nesta sessão")
   .replace("Só a sessão com `npx", "Só a sessão aberta com `npx");
-const BLOCO_ATUAL = 3897;
+const BLOCO_ATUAL = 3899;
+const VERSAO_ATUAL = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version;
 
 // onda 55c: o teste não herda o que o lançador do ironoffice pôs no ambiente de quem roda
 delete process.env.IRON_OFFICE_CHROME;
@@ -1736,16 +1740,16 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   await sleep(400);
   const ask = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ask");
-  check("43 ask: inputSchema.link.enum = ['dropkiller'] e a descrição cita link: \"dropkiller\"", JSON.stringify(ask?.inputSchema?.properties?.link?.enum) === '["dropkiller"]' && (ask?.description ?? "").includes('link: "dropkiller"'));
+  check("43 ask: inputSchema.link.enum começa por 'dropkiller' (57: + 'shopify') e a descrição cita link: \"dropkiller\"", JSON.stringify(ask?.inputSchema?.properties?.link?.enum) === '["dropkiller","shopify"]' && (ask?.description ?? "").includes('link: "dropkiller"'));
   const antes = f.calls.filter((c) => c.path === "/api/chat/messages").length;
   call(s, 10, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Já assinei: liga o DropKiller", "Depois"], skip: true, link: "dropkiller" });
   await sleep(500);
   const enviadas = f.calls.filter((c) => c.path === "/api/chat/messages");
   const q = enviadas[enviadas.length - 1]?.body?.meta?.question;
   check("43 ask com link 'dropkiller' → o site recebe meta.question.link = 'dropkiller' (com as opções)", enviadas.length === antes + 1 && q?.link === "dropkiller" && q?.options?.length === 2 && res(s, 10)?.isError !== true, JSON.stringify(q));
-  call(s, 11, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: "shopify" });
+  call(s, 11, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: "loja" });
   await sleep(400);
-  check("43 ask com link desconhecido ('shopify') → isError 'só a chave 'dropkiller'', nada enviado", res(s, 11)?.isError === true && txt(s, 11).includes("só a chave 'dropkiller'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
+  check("43 ask com link desconhecido ('loja') → isError, nada enviado (57: a mensagem cita as duas chaves)", res(s, 11)?.isError === true && txt(s, 11).includes("'dropkiller' e 'shopify'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
   call(s, 14, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: ["dropkiller"] });
   await sleep(400);
   check("43 ask com link em lista (['dropkiller']) → recusado como o site recusa, nada enviado", res(s, 14)?.isError === true && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 14));
@@ -1776,7 +1780,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(400);
   const ads = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ads_status");
   check("45a ads_status: descrição com 1 | 7 | 15 | 30 e recusada_antiga, sem 'últimos 7 dias'", !!ads && ads.description.includes("1 | 7 | 15 | 30") && ads.description.includes("recusada_antiga") && !ads.description.includes("últimos 7 dias"), ads?.description?.slice(0, 200));
-  check("45a initialize → versão atual", init?.serverInfo?.version === "0.26.1", JSON.stringify(init?.serverInfo));
+  check("45a initialize → versão atual", init?.serverInfo?.version === VERSAO_ATUAL, JSON.stringify(init?.serverInfo));
   let antigos = null;
   try {
     const src = execFileSync("git", ["show", "v0.16.0:src/server.mjs"], { cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
@@ -1824,7 +1828,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ads = tools.find((t) => t.name === "ads_status");
   check("45b ads_by_product na lista, dizendo pra copiar sem recalcular", !!tool && tool.description.includes("products, outside, pending e ad_handles") && tool.description.includes("sem recalcular"), tool?.description?.slice(0, 120));
   check("45b ads_status: descrição com os 3 campos opcionais", !!ads && ads.description.includes("products?, outside?, pending?"), ads?.description?.slice(-200));
-  check("45b initialize → versão atual", init?.serverInfo?.version === "0.26.1", JSON.stringify(init?.serverInfo));
+  check("45b initialize → versão atual", init?.serverInfo?.version === VERSAO_ATUAL, JSON.stringify(init?.serverInfo));
   call(s, 10, "ads_by_product", { project_id: LOJA, days: 30, ads: [peca], manual: { "120248500156220289": "fora" } });
   call(s, 11, "ads_by_product", { project_id: LOJA, days: 30, ads: Array.from({ length: 201 }, () => peca) });
   call(s, 12, "ads_by_product", { project_id: LOJA, days: 10, ads: [peca] });
@@ -2073,7 +2077,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
 
   let s = await sessao(base());
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("49 initialize → versão atual, bloco no mesmo tamanho (3881)", init?.serverInfo?.version === "0.26.1" && (init?.instructions ?? "").length === BLOCO_ATUAL, String((init?.instructions ?? "").length));
+  check("49 initialize → versão atual, bloco no tamanho atual (BLOCO_ATUAL)", init?.serverInfo?.version === VERSAO_ATUAL && (init?.instructions ?? "").length === BLOCO_ATUAL, String((init?.instructions ?? "").length));
   await manda(msg("e0", "Sim", { answer: { question_id: "q", option_id: "a" } }));
   await manda(msg("e1", "ação feita", { system: "action" }));
   check("49 linha: resposta de botão não leva e não gasta a vez", !texto(s, "e0").includes("[primeira conversa"), texto(s, "e0"));
@@ -2557,6 +2561,86 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("31a: referência não oferece o gate no passo seguinte", /próxima referência/.test(txt(s, 12)) && !/rode o gate/.test(txt(s, 12)), txt(s, 12));
   const ins = s.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
   check("31a: o bloco cita espiar e spy_run e cabe em 3900", /`espiar`/.test(ins) && /`spy_run`/.test(ins) && ins.length <= 3900, String(ins.length));
+  s.p.kill();
+  f.close?.();
+}
+
+// ─── onda 57 (0.27.0): links de prova no cartão, ad_library_url no Spy, ask com link shopify ───
+{
+  console.log("onda 57 (0.27.0)");
+  const LOJA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/chat/messages") return { json: { id: "q-57" } };
+    if (c.path === "/api/deliverables") return { json: { ok: true, deliverable: { id: "d-57", title: c.body.title } } };
+    if (c.path === `/api/stores/${LOJA}/spy` && c.method === "POST") return { json: { ok: true, run_id: "r57", items: [], references: [
+      { host: "loja.com", link_url: "https://loja.com/oculos", ad_library_url: "https://www.facebook.com/ads/library/?id=2228337667584149", page_name: "L", start_date: 1700000000, days: 90, ads_active: 1, marketplace: false, hits: 1 },
+      { host: "b.com", link_url: "https://b.com/p", ad_library_url: "https://www.facebook.com/ads/library/?id=1&access_token=abcdefghijklmnopqrstuvwxyz", page_name: "B", start_date: 1700000000, days: 9, ads_active: 1, marketplace: false, hits: 1 },
+    ], searched: { terms: ["oculos"], country: "CO" } } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
+  const ins = init?.instructions ?? "";
+  check("57 initialize → 0.27.0 e bloco em 3899 (≤ 3900), com 'criar loja → `office-fluxos`'", init?.serverInfo?.version === "0.27.0" && ins.length === BLOCO_ATUAL && ins.length <= 3900 && ins.includes("criar loja → `office-fluxos`"), `${init?.serverInfo?.version} ${ins.length}`);
+  s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+  await sleep(400);
+  const tools = s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? [];
+  const cardDesc = tools.find((t) => t.name === "deliver")?.inputSchema?.properties?.card?.description ?? "";
+  check("57 deliver: a descrição do card cita ad_url e page_url, só https", cardDesc.includes("ad_url?") && cardDesc.includes("page_url?") && cardDesc.includes("só `https://`"), cardDesc);
+
+  // a busca longa da Biblioteca e a página chegam IGUAIS; o vizinho com TOKEN= (o \S+ do filtro atravessa as aspas
+  // do JSON) não come o link, porque o link sai antes do filtro e volta depois
+  const BUSCA = "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=CO&q=" + "gafas%20de%20sol%20polarizadas%20".repeat(10) + "&search_type=keyword_unordered&media_type=all";
+  const PAGINA = "https://loja.com/products/oculos-polarizados-uv400";
+  const AD = "https://www.facebook.com/ads/library/?id=2228337667584149";
+  const card = { kind: "outro", summary: "s", items: [
+    { title: "Óculos", why: "custo TOKEN=abc", ad_url: AD, page_url: PAGINA, effort: "5 min", action: "Iron, quero vender como a página desse anúncio: " + AD },
+    { title: "Bermuda", why: "w", effort: "e", action: "Iron, confirma esse produto na Biblioteca: bermuda", ad_url: BUSCA },
+    { title: "Ruim", why: "w", effort: "e", action: "Iron, x", ad_url: "https://u:senha@www.facebook.com/ads/library/?id=1", page_url: "https://loja.com/p?access_token=abcdefghijklmnopqrstuvwxyz" },
+    { title: "Sutiã", why: "w", effort: "e", action: "Iron, monta a ficha da loja com esse produto: sutiã" },
+  ] };
+  const { redactKeys: rk } = await import("../hooks/shared.mjs");
+  check("57 o caso do vizinho é real: o filtro sobre o JSON inteiro (como era) come o link do Óculos", !rk(JSON.stringify(card), 50_000).text.includes(`"ad_url":"${AD}"`));
+  call(s, 10, "deliver", { title: "Mineração", agent: "iron-ceo", content: "c", card });
+  await sleep(600);
+  const post = f.calls.filter((c) => c.path === "/api/deliverables").pop()?.body?.card;
+  const it = post?.items ?? [];
+  check("57 deliver: ad_url e page_url chegam iguais ao que entrou (com o vizinho TOKEN=)", it[0]?.ad_url === AD && it[0]?.page_url === PAGINA, JSON.stringify(it[0]));
+  check("57 deliver: o resto do item passou pelo filtro (TOKEN= redigido no why)", typeof it[0]?.why === "string" && it[0].why.includes("[redigido]") && !it[0].why.includes("abc"), JSON.stringify(it[0]));
+  check("57 deliver: a busca longa da Biblioteca chega inteira", it[1]?.ad_url === BUSCA && BUSCA.length > 300, String(it[1]?.ad_url?.length));
+  check("57 deliver: link com user:senha ou com chave sai; o item fica", it[2]?.title === "Ruim" && !("ad_url" in (it[2] ?? {})) && !("page_url" in (it[2] ?? {})), JSON.stringify(it[2]));
+  check("57 gate: o retorno do deliver diz quais links caíram (item 3: ad_url e page_url), sem falha silenciosa", txt(s, 10).includes("Links do cartão ignorados") && txt(s, 10).includes("item 3: ad_url, item 3: page_url") && !txt(s, 10).includes("item 1"), txt(s, 10));
+  check("57 deliver: item sem links passa igual a hoje (sem as chaves)", it[3]?.title === "Sutiã" && !("ad_url" in (it[3] ?? {})) && !("page_url" in (it[3] ?? {})) && it.length === 4, JSON.stringify(it[3]));
+  call(s, 11, "deliver", { title: "Antigo", agent: "iron-spy", content: "c", card: { kind: "spy", items: [{ title: "a", why: "w", effort: "e", action: "Iron, escreve uma copy nesse ângulo: x" }] } });
+  await sleep(500);
+  const antigo = f.calls.filter((c) => c.path === "/api/deliverables").pop()?.body?.card;
+  check("57 gate: cartão sem links não ganha aviso no retorno", !txt(s, 11).includes("Links do cartão ignorados"), txt(s, 11));
+  check("57 deliver: cartão sem os campos novos chega igual ao que entrou", JSON.stringify(antigo) === JSON.stringify({ kind: "spy", items: [{ title: "a", why: "w", effort: "e", action: "Iron, escreve uma copy nesse ângulo: x" }] }), JSON.stringify(antigo));
+
+  call(s, 12, "spy_run", { project_id: LOJA, terms: ["oculos"], quote: "1800000000000.QQ", country: "CO" });
+  await sleep(700);
+  let spy = {};
+  try { spy = JSON.parse(txt(s, 12)); } catch { spy = {}; }
+  const refs = spy.references ?? [];
+  check("57 spy_run: a referência leva ad_library_url", refs[0]?.ad_library_url === "https://www.facebook.com/ads/library/?id=2228337667584149", JSON.stringify(refs[0]));
+  check("57 spy_run: ad_library_url com chave vira null (pageUrlArg); a referência fica", refs[1]?.host === "b.com" && refs[1]?.ad_library_url === null, JSON.stringify(refs[1]));
+
+  const antes = f.calls.filter((c) => c.path === "/api/chat/messages").length;
+  call(s, 13, "ask", { chat_id: "c1", question: "Crie a sua loja na Shopify e me diga quando terminar.", options: ["Já criei a loja", "Agora não"], link: "shopify" });
+  await sleep(500);
+  const q = f.calls.filter((c) => c.path === "/api/chat/messages").pop()?.body?.meta?.question;
+  check("57 ask com link 'shopify' → meta.question.link = 'shopify'", res(s, 13)?.isError !== true && q?.link === "shopify" && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, JSON.stringify(q));
+  call(s, 14, "ask", { chat_id: "c1", question: "x", options: ["Sim"], link: "https://shopify.pxf.io/x" });
+  call(s, 15, "ask", { chat_id: "c1", question: "x", options: ["Sim"], link: "Shopify" });
+  await sleep(500);
+  check("57 ask: URL no lugar da chave e chave fora da lista → recusadas, nada enviado", res(s, 14)?.isError === true && res(s, 15)?.isError === true && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, `${txt(s, 14)} | ${txt(s, 15)}`);
+  const SK = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "skills", "office-fluxos", "SKILL.md"), "utf8");
+  check("57 office-fluxos: seção de criar loja com link 'shopify', 'Já criei a loja' · 'Agora não', cliente sem botão, ≤ 8000", SK.includes("## Criar a loja na Shopify") && SK.includes('link: "shopify"') && SK.includes("Já criei a loja") && SK.includes("Agora não") && SK.includes("kind: cliente") && SK.length <= 8000, String(SK.length));
   s.p.kill();
   f.close?.();
 }

@@ -15,7 +15,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.26.1";
+const VERSION = "0.27.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -201,6 +201,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // 0.12.0 (onda 30): páginas. A URL passa pelo filtro de segredos: se o filtro mexeu (havia chave/token nela), não vai.
 // Regra igual à do site (lib/pages.ts validPageUrl): http(s), ≤ 500, sem usuário:senha, porta padrão, host com TLD.
 const PAGE_KINDS = ["landing", "clone", "shopify", "outra", "referencia"];
+// onda 43 + 57: as chaves de botão com link que a `ask` aceita (a URL mora só no site)
+const ASK_LINKS = ["dropkiller", "shopify"];
 // ponta a ponta da 31a: 54 mil caracteres passaram do teto do Claude Code (25 mil tokens); 30 mil cabem com folga
 const SPY_RESPONSE_MAX = 30_000;
 function pageUrlArg(v) {
@@ -213,6 +215,35 @@ function pageUrlArg(v) {
   if ((u.protocol !== "http:" && u.protocol !== "https:") || u.username || u.password || u.port !== "") return null;
   if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(u.hostname)) return null;
   return u.href.length <= 500 ? u.href : null;
+}
+// 0.27.0 (onda 57): os links de prova do cartão (`ad_url` = anúncio ou busca na Biblioteca, `page_url` = página de
+// vendas) NÃO passam pelo redactKeys do cartão: trecho reescrito viraria outro endereço, e o filtro, rodando sobre o
+// JSON inteiro, come o link vizinho de um campo com `TOKEN=` (o `\S+` atravessa as aspas). Saem antes, passam pelo
+// pageUrlArg (recusa senha e chave; inválido = campo fora) e voltam depois. O site valida de novo.
+const CARD_LINK_KEYS = ["ad_url", "page_url"];
+export function cardLinks(rawCard) {
+  if (!rawCard || typeof rawCard !== "object" || Array.isArray(rawCard) || !Array.isArray(rawCard.items)) return { card: rawCard, links: [], dropped: [] };
+  const links = [];
+  const dropped = []; // gate 57: link que caiu volta dito no retorno do deliver (nunca em silêncio)
+  const items = rawCard.items.map((it, i) => {
+    if (!it || typeof it !== "object" || Array.isArray(it)) { links.push(null); return it; }
+    const rest = { ...it };
+    const l = {};
+    for (const k of CARD_LINK_KEYS) {
+      const had = rest[k] !== undefined && rest[k] !== null && rest[k] !== "";
+      const ok = pageUrlArg(rest[k]);
+      delete rest[k];
+      if (ok) l[k] = ok;
+      else if (had) dropped.push(`item ${i + 1}: ${k}`);
+    }
+    links.push(l);
+    return rest;
+  });
+  return { card: { ...rawCard, items }, links, dropped };
+}
+export function cardWithLinks(card, links) {
+  if (!card || typeof card !== "object" || !Array.isArray(card.items) || !links.length) return card;
+  return { ...card, items: card.items.map((it, i) => (it && typeof it === "object" && !Array.isArray(it) && links[i] ? { ...it, ...links[i] } : it)) };
 }
 function localPathArg(v) {
   const s = String(v).trim();
@@ -545,7 +576,7 @@ const INSTRUCTIONS = DEGRADED
       "Resultado longo (relatório, auditoria, spy, copy, plano): `deliver` com título, agente e conteúdo completo ANTES do `reply`; o `reply` termina com a url. Auditoria/Spy: o JSON do bloco `## Cartão` vai em `card`, sem reescrever, e a página auditada em `url`; o `reply` vira 1–2 linhas + url.",
       "Página terminada (lp-cinematico, iron-clone, página da Shopify fora do produto): `page_save` com título, tipo e a URL (no ar) ou a pasta (rascunho). Quem publica é o aluno, nunca você.",
       "Loja: a 1ª linha `[loja: …]` é a loja ativa do aluno; se tem ficha, leia-a antes de responder; se diz `ficha: ainda sem ficha` e o pedido é da loja, ofereça em 1 linha montar a ficha (skill `loja`) e espere o sim. O iron-shopify usa `shop_status` e `shop_query` deste plugin, nunca `curl`. Leituras, `reply` e `deliver` vão pra loja da última mensagem; mutation leva sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: …]`).",
-      "Gatilho → skill, ANTES de agir: `anúncios: atualizar` ou 'como estão meus anúncios' → `anuncios`; imagem ('gera uma imagem', 'variação da imagem <id>', 'sobe/tira essa da Shopify') → `imagens`; `trilha: <etapa>` ou 'continuar a trilha' → `trilha`; 'o que está vendendo em <país>', 'minerar', 'produto vencedor' → `minerar`; página de vendas na lógica de uma referência ('quero vender como esta página'), página pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido → `office-fluxos`.",
+      "Gatilho → skill, ANTES de agir: `anúncios: atualizar` ou 'como estão meus anúncios' → `anuncios`; imagem ('gera uma imagem', 'variação da imagem <id>', 'sobe/tira essa da Shopify') → `imagens`; `trilha: <etapa>` ou 'continuar a trilha' → `trilha`; 'o que está vendendo em <país>', 'minerar', 'produto vencedor' → `minerar`; página na lógica de uma referência ('quero vender como esta página'), página pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido, criar loja → `office-fluxos`.",
       "Ferramenta da Meta ausente nesta sessão, ou pedido `/mcp`: responda os 3 passos (no terminal: `/mcp` → `meta-ads` → entrar com o Facebook; depois fechar e abrir o `ironoffice`), nunca 'não funciona aqui'.",
       "Pergunta ao aluno é `ask`: UMA por mensagem, com opções (até 6) e `skip`; espere a resposta. Vale pra sim/não, oferta de UMA ação e CAMINHOS ('A ou B', uma opção por caminho): o aluno clica, não digita comando. Um `reply` NUNCA termina com pergunta nem com 'é só responder X', 'escreve X', 'me diga X': se precisa de resposta, a última chamada da rodada é uma `ask`. Dados que faltam, do aluno OU do fornecedor: UM formulário (`ask` com `fields`, até 12); o que ele pular vira 'dado pendente'; nunca 'me manda depois' sem formulário.",
       "LOTE: duas ou mais tags antes de responder = cada uma tem a sua resposta, na ordem; 'Pular' recebe 1 linha. O retorno das ferramentas avisa mensagem sem resposta e passo pendente: não encerre a rodada com aviso em aberto.",
@@ -600,7 +631,7 @@ const TOOLS = DEGRADED
             card: {
               type: "object",
               description:
-                "Opcional: o JSON do bloco `## Cartão` que o agente devolveu, sem reescrever: { kind, score, summary, items: [{ title, why, effort, action }] }.",
+                "Opcional: o JSON do bloco `## Cartão` que o agente devolveu, sem reescrever: { kind, score, summary, items: [{ title, why, effort, action, ad_url?, page_url? }] }; `ad_url` = o anúncio (ou a busca) na Biblioteca de Anúncios, `page_url` = a página de vendas; os dois só `https://`.",
             },
             project_id: { type: "string", description: "Opcional: id da loja da entrega. Sem ele, a loja da última mensagem." },
             url: { type: "string", description: "Opcional: a URL da página auditada ou entregue (https://…); o site liga a entrega à página na aba Páginas." },
@@ -629,7 +660,7 @@ const TOOLS = DEGRADED
       {
         name: "ask",
         description:
-          "Faz UMA pergunta ao aluno no chat do Iron Office, com botões de opção (até 6), campo livre e 'Pular'; OU um formulário (`fields`, até 12 campos, cada um com 'Pular este' e um botão 'Enviar respostas'). O clique do aluno chega como mensagem normal do canal (formulário: 'rótulo: valor' por linha). Só na sessão do canal. Uma pergunta (ou um formulário) por vez: espere a resposta antes da próxima. Sim/não, oferta de uma ação e caminhos ('A ou B') são ask, nunca prosa. Dados que faltam, do aluno ou do fornecedor, vão em fields; o que ele pular vira 'dado pendente'. `link: \"dropkiller\"` acrescenta o botão de assinar o DropKiller (só nessa pergunta).",
+          "Faz UMA pergunta ao aluno no chat do Iron Office, com botões de opção (até 6), campo livre e 'Pular'; OU um formulário (`fields`, até 12 campos, cada um com 'Pular este' e um botão 'Enviar respostas'). O clique do aluno chega como mensagem normal do canal (formulário: 'rótulo: valor' por linha). Só na sessão do canal. Uma pergunta (ou um formulário) por vez: espere a resposta antes da próxima. Sim/não, oferta de uma ação e caminhos ('A ou B') são ask, nunca prosa. Dados que faltam, do aluno ou do fornecedor, vão em fields; o que ele pular vira 'dado pendente'. `link: \"dropkiller\"` acrescenta o botão de assinar o DropKiller; `link: \"shopify\"`, o de criar a loja na Shopify (só nessa pergunta).",
         inputSchema: {
           type: "object",
           properties: {
@@ -647,7 +678,7 @@ const TOOLS = DEGRADED
               description: "Opcional: formulário, 1 a 12 campos { id (a-z, 0-9, _; até 24), label (até 80), placeholder (até 60), kind: text | number | money | yesno }. Com fields, não mande options.",
               items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, kind: { type: "string", enum: FIELD_KINDS } }, required: ["id", "label"] },
             },
-            link: { type: "string", enum: ["dropkiller"], description: "Opcional: chave de um botão com link que o site conhece (hoje só 'dropkiller' = assinar o DropKiller com o link do Iron Office). Nunca uma URL." },
+            link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um botão com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o botão não aparece, então o texto da pergunta tem que valer sozinho). Nunca uma URL." },
             project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da última mensagem." },
           },
           required: ["chat_id", "question"],
@@ -901,8 +932,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const rawCard = args.card && typeof args.card === "object" && !Array.isArray(args.card) ? args.card : null;
     // o cartão é JSON livre do modelo: passa pelo mesmo filtro (texto do JSON), e se não voltar JSON, não vai
     let card = null;
+    let linksFora = [];
     if (rawCard) {
-      try { card = JSON.parse(redactKeys(JSON.stringify(rawCard), DELIVER_MAX).text); } catch { card = null; }
+      const { card: semLinks, links, dropped } = cardLinks(rawCard);
+      linksFora = dropped;
+      try { card = cardWithLinks(JSON.parse(redactKeys(JSON.stringify(semLinks), DELIVER_MAX).text), links); } catch { card = null; }
     }
     if (!title || !content.trim()) return text("title e content são obrigatórios.", true);
     // 0.12.0 (onda 30): a página auditada; fora da regra não vai (o site também ignora, a entrega não se perde)
@@ -929,7 +963,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         trilhaP.clear();
       }
       formulario.clear(); // 0.14.2: o deliver não sabe a conversa; a entrega saiu, o lembrete acaba
-      return text(JSON.stringify({ id, url }) + pageIdNote + proximo);
+      const linksNote = linksFora.length ? ` Links do cartão ignorados (só https://, sem senha, chave, porta ou aspas): ${linksFora.join(", ")}.` : "";
+      return text(JSON.stringify({ id, url }) + pageIdNote + linksNote + proximo);
     } catch (e) {
       return text(`Falhou ao salvar a entrega: ${e.message}`, true);
     }
@@ -1011,7 +1046,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     // 0.16.0 (onda 43): link por CHAVE, nunca URL; quem conhece a URL é o site
     // gate 43: só string (o site recusa não-string; String(["dropkiller"]) passaria aqui)
     const link = args.link;
-    if (link !== undefined && (typeof link !== "string" || link !== "dropkiller")) return text("link: só a chave 'dropkiller' existe hoje.", true);
+    // 0.27.0 (onda 57): + "shopify" (Criar minha loja na Shopify); a lista é a mesma do enum da ferramenta
+    if (link !== undefined && (typeof link !== "string" || !ASK_LINKS.includes(link))) return text("link: só as chaves 'dropkiller' e 'shopify' existem hoje.", true);
     if (raw.length > Q_OPTIONS_MAX) return text(`Opções demais (${raw.length}; máximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;
@@ -1232,7 +1268,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     // só o que a análise usa, campo a campo: o texto do anúncio é de terceiro
     const slimItem = (a) => ({ page_name: safe(a?.page_name, 120), days: num(a?.days), is_active: a?.is_active === true, ads_count: num(a?.ads_count), collation_count: num(a?.collation_count), link_url: safe(a?.link_url, 200), host: safe(a?.host, 200), cta_text: safe(a?.cta_text, 60), title: safe(a?.title, 120), body: safe(a?.body, 240), platforms: Array.isArray(a?.platforms) ? a.platforms.filter((p) => typeof p === "string").slice(0, 8) : [] });
     // o endereço não passa pelo redactKeys: trecho reescrito viraria outra página; pageUrlArg recusa o que tiver senha ou chave
-    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, page_name: safe(r?.page_name, 120), start_date: num(r?.start_date), days: num(r?.days), ads_active: num(r?.ads_active), marketplace: r?.marketplace === true, category: safe(r?.category, 40), hits: num(r?.hits) });
+    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, ad_library_url: typeof r?.ad_library_url === "string" ? pageUrlArg(r.ad_library_url) : null, page_name: safe(r?.page_name, 120), start_date: num(r?.start_date), days: num(r?.days), ads_active: num(r?.ads_active), marketplace: r?.marketplace === true, category: safe(r?.category, 40), hits: num(r?.hits) });
     // 0.25.0 (onda 31a.1): o que o site deixou fora das referências, com o motivo fechado em dois valores
     const slimDropped = (r) => ({ host: safe(r?.host, 200), page_name: safe(r?.page_name, 120), reason: r?.reason === "marketplace" ? "marketplace" : "sem o produto" });
     try {
