@@ -7,15 +7,17 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { estadoPrimeira } from "./primeira.mjs";
+import { originalPath } from "./originais.mjs";
 import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.28.0";
+const VERSION = "0.29.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -203,6 +205,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const PAGE_KINDS = ["landing", "clone", "shopify", "outra", "referencia"];
 // onda 43 + 57: as chaves de botão com link que a `ask` aceita (a URL mora só no site)
 const ASK_LINKS = ["dropkiller", "shopify"];
+// 0.29.0 (onda 59): até 8 miniaturas numa ask (o mesmo teto do site, lib/question.ts Q_IMAGES_MAX)
+const Q_IMAGES_MAX = 8;
 // ponta a ponta da 31a: 54 mil caracteres passaram do teto do Claude Code (25 mil tokens); 30 mil cabem com folga
 const SPY_RESPONSE_MAX = 30_000;
 function pageUrlArg(v) {
@@ -679,6 +683,7 @@ const TOOLS = DEGRADED
               items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, kind: { type: "string", enum: FIELD_KINDS } }, required: ["id", "label"] },
             },
             link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um botão com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o botão não aparece, então o texto da pergunta tem que valer sozinho). Nunca uma URL." },
+            images: { type: "array", items: { type: "string" }, description: "Opcional (onda 59): escolha entre imagens = `images` com 1 a 8 ids COMPLETOS da aba Imagens (os do image_generate); o site mostra as miniaturas e o clique volta como 'imagem escolhida: <id>'. Nunca mande link de imagem no `reply` pra escolher. Com images, options e free são opcionais." },
             project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da última mensagem." },
           },
           required: ["chat_id", "question"],
@@ -782,6 +787,20 @@ const TOOLS = DEGRADED
             },
           },
           required: ["project_id", "prompt", "destination"],
+        },
+      },
+      {
+        name: "image_get",
+        description:
+          "Traz pro computador o ARQUIVO ORIGINAL de uma imagem da aba Imagens (onda 59), pelo site, com a chave do aluno: nada de curl, print de tela ou navegador. Use quando chegar 'imagem escolhida: <id>' (clique na miniatura ou no botão 'Escolhi esta') ou quando precisar ver/usar uma imagem que o aluno aprovou. Grava numa pasta FIXA (`<cofre>/Projetos/<loja>/marca/originais/<8 primeiros do id>.<ext>`; sem cofre, `~/Iron Office/<loja>/marca/originais/`) e devolve { ok, path, kind, bytes, sha256, project_id }. Leia o arquivo pelo `path` pra ver a imagem. ESTE É O ARQUIVO ORIGINAL: imagem aprovada não se redesenha, não se refaz a partir de print e não se 'limpa'. kind 'alpha' = o mesmo desenho em PNG sem o fundo (o site recorta fundo liso; fundo com degradê/foto volta reason 'fundo_nao_liso' e aí fica o original). A imagem tem que ser da loja do project_id. Só ids completos (UUID).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: …])." },
+            image_id:   { type: "string", description: "id COMPLETO da imagem (UUID), o que veio em 'imagem escolhida: <id>' ou no image_generate." },
+            kind:       { type: "string", enum: ["original", "alpha"], description: "original (padrão) ou alpha (PNG sem fundo)." },
+          },
+          required: ["project_id", "image_id"],
         },
       },
       {
@@ -1020,6 +1039,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!q) return text("question é obrigatória.", true);
     if (q.length > Q_TEXT_MAX) return text(`Pergunta longa demais (${q.length}; máximo ${Q_TEXT_MAX}). Encurte e mande uma pergunta só.`, true);
     const raw = Array.isArray(args.options) ? args.options : [];
+    // 0.29.0 (onda 59): escolher entre imagens é clicar na miniatura; aqui só ids completos (o site confere o dono)
+    let images;
+    if (args.images !== undefined) {
+      if (args.fields !== undefined) return text("images não vai no formulário: mande numa ask sem fields.", true);
+      if (!Array.isArray(args.images) || args.images.length === 0 || args.images.length > Q_IMAGES_MAX) return text(`images: de 1 a ${Q_IMAGES_MAX} ids de imagem.`, true);
+      const list = args.images.map((x) => (typeof x === "string" ? x.trim().toLowerCase() : ""));
+      if (list.some((x) => !UUID_RE.test(x))) return text("images: cada item é o id COMPLETO (UUID) da imagem, o que o image_generate devolveu. Link ou id curto não vale.", true);
+      if (new Set(list).size !== list.length) return text("images: id repetido.", true);
+      images = list;
+    }
     if (args.fields !== undefined) {
       // 0.13.0 (31b rev1): formulário. Validação igual à do site (lib/question.ts), com a mensagem pro Iron consertar
       if (raw.length > 0) return text("Formulário (fields) e opções (options) não vão juntos: mande um ou outro.", true);
@@ -1064,7 +1093,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (raw.length > Q_OPTIONS_MAX) return text(`Opções demais (${raw.length}; máximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;
-    if (raw.length === 0 && !free) return text("Sem opções: passe options (até 6) ou free=true.", true);
+    if (raw.length === 0 && !free && !images) return text("Sem opções: passe options (até 6), images ou free=true.", true);
     const options = [];
     const ids = new Set();
     for (const [i, o] of raw.entries()) {
@@ -1072,7 +1101,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (!label) return text(`Opção ${i + 1} vazia.`, true);
       if (label.length > Q_LABEL_MAX) return text(`Opção ${i + 1} longa demais (${label.length}; máximo ${Q_LABEL_MAX}).`, true);
       const given = typeof o === "object" && o && typeof o.id === "string" ? o.id.trim().toLowerCase() : "";
-      const id = OPTION_ID_RE.test(given) && !ids.has(given) ? given : `o${i + 1}`;
+      // img<n> é o id do clique na miniatura (onda 59): opção do Iron não usa
+      const id = OPTION_ID_RE.test(given) && !ids.has(given) && !/^img\d+$/.test(given) ? given : `o${i + 1}`;
       if (ids.has(id)) return text("Opções com id repetido.", true);
       ids.add(id);
       options.push({ id, label });
@@ -1084,9 +1114,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const store = storeArg(args);
       const res = await api("/api/chat/messages", {
         method: "POST",
-        body: { conversation_id: chatId || null, text: q, meta: { ...(store ? { project_id: store } : {}), question: { text: q, options, free, skip, ...(link ? { link } : {}) } } },
+        body: { conversation_id: chatId || null, text: q, meta: { ...(store ? { project_id: store } : {}), question: { text: q, options, free, skip, ...(link ? { link } : {}), ...(images ? { images } : {}) } } },
       });
-      return text(`Pergunta enviada (id ${res?.id ?? "?"}). Espere a resposta do aluno antes da próxima.` + avisosDoAsk(chatId || DEFAULT_CONVERSATION));
+      const comImagens = images ? ` O clique numa miniatura chega como 'imagem escolhida: <id>': aí chame image_get com esse id (o arquivo original; nunca redesenhe).` : "";
+      return text(`Pergunta enviada (id ${res?.id ?? "?"}). Espere a resposta do aluno antes da próxima.` + comImagens + avisosDoAsk(chatId || DEFAULT_CONVERSATION));
     } catch (e) {
       return text(`Falhou ao enviar a pergunta: ${e.message}`, true);
     }
@@ -1246,7 +1277,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const pick = res.dry_run
         ? { ok: true, dry_run: true, provider: res.provider ?? null, destination: res.destination ?? null, n: res.n ?? n, estimate_usd: res.estimate_usd ?? null, cap_usd: res.cap_usd ?? null, cap_left_usd: res.cap_left_usd ?? null, fits: res.fits ?? null, quote: typeof res.quote === "string" ? res.quote : null, ...refPick(res.reference) }
         : { ok: res.ok === true, id: res.id ?? null, url: page(res.id), width: res.width ?? null, height: res.height ?? null, provider: res.provider ?? null, cost_usd: res.cost_usd ?? null, cost_kind: res.cost_kind ?? null, cap_left_usd: res.cap_left_usd ?? null,
-          ...(imgs.length > 1 ? { images: imgs } : {}), ...refPick(res.reference), ...(res.partial ? { partial: true, generated: res.generated ?? null, saved: res.saved ?? null } : {}) };
+          ...(imgs.length > 1 ? { images: imgs, proximo: "Mais de uma imagem: mostre por `ask` com `images` (os ids acima), pergunta 'Qual destas?'. Nunca mande os links no reply pra escolher." } : {}), ...refPick(res.reference), ...(res.partial ? { partial: true, generated: res.generated ?? null, saved: res.saved ?? null } : {}) };
       return text(JSON.stringify(pick));
     } catch (e) {
       if (e instanceof AuthError) return text("Chave do Iron Office inválida: refaça o passo 2 em ironoffice.app/onboarding.", true);
@@ -1378,6 +1409,50 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (e instanceof AuthError) return text("Chave do Iron Office inválida: refaça o passo 2 em ironoffice.app/onboarding.", true);
       if (e.name === "AbortError") return text("O site não respondeu a tempo. Confira a aba Páginas antes de registrar de novo.", true);
       return text(`O site não registrou a página: ${redactKeys(String(e.message ?? ""), 300).text}`, true);
+    }
+  }
+
+  // 0.29.0 (onda 59): o arquivo ORIGINAL da imagem escolhida, pelo site, com a chave (o porteiro não entra: é o plugin)
+  if (name === "image_get") {
+    const id = String(args.project_id ?? "").trim().toLowerCase();
+    if (!UUID_RE.test(id)) return text("project_id inválido: use o id da loja (linha [loja: …] ou shop_status).", true);
+    const imageId = String(args.image_id ?? "").trim().toLowerCase();
+    if (!UUID_RE.test(imageId)) return text("image_id: o id COMPLETO (UUID) da imagem, o de 'imagem escolhida: <id>'. Id curto ou link não vale.", true);
+    const kind = args.kind === undefined || args.kind === null ? "original" : args.kind;
+    if (kind !== "original" && kind !== "alpha") return text("kind: original ou alpha.", true);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 45_000);
+    try {
+      const res = await fetch(`${BASE}/api/images/${imageId}/file?kind=${kind}`, { headers: { "x-api-key": API_KEY }, signal: ctrl.signal });
+      if (res.status === 401) return text("Chave do Iron Office inválida: refaça o passo 2 em ironoffice.app/onboarding.", true);
+      if (!res.ok) {
+        // gate 59 r1: corpo null ou que não é objeto não derruba (vira {})
+        const j0 = await res.json().catch(() => null);
+        const j = j0 && typeof j0 === "object" ? j0 : {};
+        if (res.status === 404) return text("Imagem não encontrada nesta conta (apagada ou de outra conta). Confira o id na aba Imagens.", true);
+        if (res.status === 422) return text(JSON.stringify({ ok: false, reason: typeof j.reason === "string" ? j.reason.slice(0, 40) : "sem_recorte", error: String(j.error ?? "").slice(0, 240), proximo: "Fica o original (kind original). Diga ao aluno a frase do `error`, com todas as letras: o recorte sem fundo, aqui, mudaria o desenho; se ele precisar, um designer recorta a partir do original." }));
+        return text(`Não deu pra trazer a imagem: ${String(j.error ?? `HTTP ${res.status}`).slice(0, 200)}`, true);
+      }
+      if ((res.headers.get("x-image-project") ?? "").toLowerCase() !== id) return text("Essa imagem é de outra loja desta conta: confira a loja do pedido (linha [loja: …]).", true);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (!buf.length || buf.length > 15 * 1024 * 1024) return text("O site devolveu um arquivo vazio ou grande demais.", true);
+      const png = /png/i.test(res.headers.get("content-type") ?? "");
+      // a pasta da loja: o nome vem da lista de lojas da conta (só vira slug a-z0-9-)
+      let store = null;
+      try { const l = await api("/api/shopify/graphql?stores=1"); store = Array.isArray(l?.stores) ? l.stores.find((x) => x?.project_id === id) ?? null : null; } catch {}
+      const { dir, file } = originalPath({ store: store ?? { slug: id.slice(0, 8) }, imageId, kind: kind === "alpha" ? "alpha" : png ? "original-png" : "original" });
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(file, buf);
+      const sha256 = createHash("sha256").update(buf).digest("hex");
+      return text(JSON.stringify({ ok: true, path: file, kind, bytes: buf.length, sha256, project_id: id,
+        nota: kind === "alpha"
+          ? "PNG sem fundo do MESMO desenho (recorte do site, pixel a pixel). É o logo oficial em imagem. Não redesenhe."
+          : "Este é o arquivo ORIGINAL que o aluno aprovou. Leia pelo path pra ver. Não redesenhe, não refaça a partir de print, não 'limpe' letra." }));
+    } catch (e) {
+      if (e?.name === "AbortError") return text("O site demorou demais pra mandar a imagem; tente de novo em 1 minuto.", true);
+      return text(`Não deu pra trazer a imagem: ${String(e?.message ?? e).slice(0, 200)}`, true);
+    } finally {
+      clearTimeout(t);
     }
   }
 

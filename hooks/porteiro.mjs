@@ -24,7 +24,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { porteiroHash, porteiroMode, porteiroPergunta, PORTEIRO_ROTULOS, PORTEIRO_SEM_NOME, redactKeys } from "./shared.mjs";
+import { porteiroHash, porteiroItemCurto, porteiroMode, porteiroPergunta, PORTEIRO_ROTULOS, PORTEIRO_SEM_NOME, redactKeys } from "./shared.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const hashOf = porteiroHash;
@@ -507,6 +507,9 @@ function tocaPorteiro(tool, input, home, cwd) {
   else txt = typeof input.file_path === "string" ? input.file_path : typeof input.notebook_path === "string" ? input.notebook_path : "";
   const ls = brutos(txt);
   if (ls.some((t) => PASTA_RE.test(t) || (/\.iron(?![a-z0-9_-])/.test(t) && /porteiro/.test(t)))) return true;
+  // gate 59 r1: `.iron/p*/registro.jsonl` e `.iron/p?rteiro` escapavam do nome; curinga num caminho de .iron conta como mexer
+  // (o registro passou a ser a âncora da pergunta com nome cortado). Concatenação dentro de script continua fora: pendência.
+  if (ls.some((t) => /\.iron(?![a-z0-9_-])/.test(t) && /[*?[{]/.test(t))) return true;
   const c = norm(cwd).toLowerCase(), h = norm(home).toLowerCase();
   return (c === `${h}/.iron` || c.startsWith(`${h}/.iron/`)) && ls.some((t) => /porteiro/.test(t));
 }
@@ -530,7 +533,7 @@ export function motivo(item, tipo) {
   const h = hashOf(vis);
   return (
     `[porteiro] "${vis}" (${tipo}) não é da casa e o aluno ainda não liberou. NÃO rode de novo nem procure outro caminho de instalação. ` +
-    `Faça UMA pergunta pelo ask: question exatamente "${porteiroPergunta(vis, tipo)}" ` +
+    `Faça UMA pergunta pelo ask: question exatamente "${porteiroPergunta(porteiroItemCurto(vis), tipo)}" ` +
     `options exatamente [{"id":"pt-estudar-${h}","label":"${PORTEIRO_ROTULOS.estudar}"},{"id":"pt-instalar-${h}","label":"${PORTEIRO_ROTULOS.instalar}"},{"id":"pt-nao-${h}","label":"${PORTEIRO_ROTULOS.nao}"}]. ` +
     `Estudar antes → carregue a skill estudar-instalacao. Só depois de "${PORTEIRO_ROTULOS.instalar}" o mesmo comando passa (30 minutos). Não instalar → siga sem ele.`
   );
@@ -566,7 +569,9 @@ function registra(home, linhas) {
     const dir = join(home, ".iron", "porteiro");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const at = new Date().toISOString();
-    const txt = linhas.map((l) => JSON.stringify({ at, item: redactKeys(l.item, 300).text, tipo: l.tipo, decisao: l.decisao })).join("\n") + "\n";
+    // onda 59: barrado leva o hash do item inteiro e o nome cortado da pergunta (o servidor confere a ask por eles)
+    const txt = linhas.map((l) => JSON.stringify({ at, item: redactKeys(l.item, 300).text, tipo: l.tipo, decisao: l.decisao,
+      ...(l.decisao === "barrado" ? { hash: hashOf(shown(l.item)), curto: porteiroItemCurto(shown(l.item)) } : {}) })).join("\n") + "\n";
     appendFileSync(join(dir, "registro.jsonl"), txt, { mode: 0o600 });
   } catch {
     // registro é ajuda, não condição

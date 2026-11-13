@@ -113,12 +113,33 @@ const TIPOS_BASE = [
 ];
 export const PORTEIRO_SEM_NOME = "; não consegui ler o nome";
 export const PORTEIRO_TIPOS = TIPOS_BASE.flatMap((t) => [t, t + PORTEIRO_SEM_NOME]);
+// 0.29.0 (onda 59): o nome do item na PERGUNTA vai até 120 caracteres (a pergunta inteira tem que caber nos 300 do chat;
+// um link comprido de download estourava e o aluno nem via a pergunta). O id continua sendo o hash do item INTEIRO:
+// liberar vale pro item inteiro, nunca pra tudo que começa igual. O gancho registra hash + nome cortado pra conferência.
+export const PORTEIRO_ITEM_MAX = 120;
+export const porteiroItemCurto = (item) => {
+  const s = String(item);
+  // gate 59 r1: o teto do chat conta unidades UTF-16 (emoji = 2); corta por caractere sem passar de 120 unidades
+  if (s.length <= PORTEIRO_ITEM_MAX) return s;
+  let out = "";
+  for (const ch of s) { if (out.length + ch.length > PORTEIRO_ITEM_MAX - 1) break; out += ch; }
+  return out + "…";
+};
 export const porteiroPergunta = (item, tipo) => `O Iron quer instalar ${item} (${tipo}). Nada de fora entra no seu computador sem você decidir.`;
 export const porteiroPerguntaEstudo = (item) => `Depois do estudo: instalo ${item}?`;
 
 // gate 54 r1: o Iron escreve o texto e os ids do ask; sem esta conferência ele podia perguntar sobre uma coisa e mandar o id
 // de outra. Devolve null (não é pergunta do porteiro), { ok: true } ou { ok: false, error }.
-export function porteiroAskCheck(text, options) {
+function cortadoRegistrado(home, hash, curto) {
+  let linhas;
+  try { linhas = readFileSync(join(home, ".iron", "porteiro", "registro.jsonl"), "utf8").split("\n").slice(-300); } catch { return false; }
+  for (const l of linhas) {
+    try { const r = JSON.parse(l); if (r?.decisao === "barrado" && r.hash === hash && r.curto === curto) return true; } catch {}
+  }
+  return false;
+}
+
+export function porteiroAskCheck(text, options, { home = homedir() } = {}) {
   const opts = Array.isArray(options) ? options : [];
   if (!opts.some((o) => typeof o?.id === "string" && o.id.startsWith("pt-"))) return null;
   const erro = (e) => ({ ok: false, error: `Pergunta do porteiro fora do modelo: ${e}. Use exatamente o texto e as opções que o motivo do porteiro mandou.` });
@@ -139,6 +160,8 @@ export function porteiroAskCheck(text, options) {
   }
   if (item === null && t.startsWith("Depois do estudo: instalo ") && t.endsWith("?")) item = t.slice("Depois do estudo: instalo ".length, -1);
   if (!item) return erro("o texto da pergunta mudou");
-  if (porteiroHash(item) !== hash) return erro(`o item "${item}" não é o do id`);
-  return { ok: true };
+  if (porteiroHash(item) === hash) return { ok: true };
+  // nome cortado (onda 59): vale só se o GANCHO barrou um item com esse hash e esse mesmo nome cortado
+  if (item.endsWith("…") && cortadoRegistrado(home, hash, item)) return { ok: true };
+  return erro(`o item "${item}" não é o do id`);
 }

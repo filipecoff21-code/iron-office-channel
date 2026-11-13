@@ -2984,7 +2984,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve.call(this, root, ref);
+      let _sch = resolve2.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3011,7 +3011,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve(root, ref) {
+    function resolve2(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3841,7 +3841,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve(baseURI, relativeURI, options) {
+    function resolve2(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -3874,49 +3874,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative, options, skipNormalization) {
+    function resolveComponent(base, relative2, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative = parse3(serialize(relative, options), options);
+        relative2 = parse3(serialize(relative2, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative.scheme) {
-        target.scheme = relative.scheme;
-        target.userinfo = relative.userinfo;
-        target.host = relative.host;
-        target.port = relative.port;
-        target.path = removeDotSegments(relative.path || "");
-        target.query = relative.query;
+      if (!options.tolerant && relative2.scheme) {
+        target.scheme = relative2.scheme;
+        target.userinfo = relative2.userinfo;
+        target.host = relative2.host;
+        target.port = relative2.port;
+        target.path = removeDotSegments(relative2.path || "");
+        target.query = relative2.query;
       } else {
-        if (relative.userinfo !== void 0 || relative.host !== void 0 || relative.port !== void 0) {
-          target.userinfo = relative.userinfo;
-          target.host = relative.host;
-          target.port = relative.port;
-          target.path = removeDotSegments(relative.path || "");
-          target.query = relative.query;
+        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
+          target.userinfo = relative2.userinfo;
+          target.host = relative2.host;
+          target.port = relative2.port;
+          target.path = removeDotSegments(relative2.path || "");
+          target.query = relative2.query;
         } else {
-          if (!relative.path) {
+          if (!relative2.path) {
             target.path = base.path;
-            if (relative.query !== void 0) {
-              target.query = relative.query;
+            if (relative2.query !== void 0) {
+              target.query = relative2.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative.path[0] === "/") {
-              target.path = removeDotSegments(relative.path);
+            if (relative2.path[0] === "/") {
+              target.path = removeDotSegments(relative2.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative.path;
+                target.path = "/" + relative2.path;
               } else if (!base.path) {
-                target.path = relative.path;
+                target.path = relative2.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative.query;
+            target.query = relative2.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3924,7 +3924,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative.fragment;
+      target.fragment = relative2.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4210,7 +4210,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve,
+      resolve: resolve2,
       resolveComponent,
       equal,
       serialize,
@@ -10513,7 +10513,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve) {
+function isRecursive(inst, stack, resolve2) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -10523,7 +10523,7 @@ function isRecursive(inst, stack, resolve) {
   let result = NONE;
   const check = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve);
+      const answer = isRecursive(child, stack, resolve2);
       if (answer > result)
         result = answer;
     }
@@ -10534,7 +10534,7 @@ function isRecursive(inst, stack, resolve) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve2) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -10598,7 +10598,7 @@ function isRecursive(inst, stack, resolve) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve2 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -15697,7 +15697,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -15714,7 +15714,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -15792,7 +15792,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve(parseResult.data);
+            resolve2(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -16054,12 +16054,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve, interval);
+      const timeoutId = setTimeout(resolve2, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -16935,22 +16935,23 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve) => {
+    return new Promise((resolve2) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve();
+        resolve2();
       } else {
-        this._stdout.once("drain", resolve);
+        this._stdout.once("drain", resolve2);
       }
     });
   }
 };
 
 // src/server.mjs
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync, unlinkSync as unlinkSync2, existsSync as existsSync2 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync2, mkdirSync, unlinkSync as unlinkSync2, existsSync as existsSync2 } from "node:fs";
+import { createHash as createHash2 } from "node:crypto";
+import { homedir as homedir3 } from "node:os";
 import { execFile, spawn } from "node:child_process";
-import { dirname, join as join3 } from "node:path";
+import { dirname as dirname2, join as join4 } from "node:path";
 
 // src/primeira.mjs
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -16972,11 +16973,85 @@ function estadoPrimeira(cwd) {
   }
 }
 
+// src/originais.mjs
+import { readFileSync as readFileSync2, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join as join2, relative, resolve, sep } from "node:path";
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function campoYaml(txt, nome, bloco) {
+  const linhas = String(txt || "").replace(/^\uFEFF/, "").split(/\r?\n/);
+  let dentro = !bloco;
+  for (const l of linhas) {
+    if (/^\s*(#|$)/.test(l)) continue;
+    if (bloco) {
+      if (/^\S/.test(l)) {
+        dentro = new RegExp("^" + bloco + ":\\s*(#.*)?$").test(l);
+        continue;
+      }
+      if (!dentro) continue;
+    } else if (/^\s/.test(l)) continue;
+    const m = l.match(new RegExp("^\\s*" + nome + ":\\s*(.*)$"));
+    if (!m) continue;
+    const v = m[1].trim();
+    if (v.startsWith('"')) {
+      const q = v.match(/^"((?:[^"\\]|\\.)*)"/);
+      return q ? q[1].replace(/\\(["\\])/g, "$1") : "";
+    }
+    if (v.startsWith("'")) {
+      const q = v.match(/^'((?:[^']|'')*)'/);
+      return q ? q[1].replace(/''/g, "'") : "";
+    }
+    return v.replace(/\s+#.*$/, "").trim();
+  }
+  return "";
+}
+var isDir = (p) => {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+function cofreDir(home = homedir()) {
+  let txt = "";
+  try {
+    txt = readFileSync2(join2(home, ".iron", "config.yaml"), "utf8");
+  } catch {
+    return null;
+  }
+  const str = (v) => typeof v === "string" && v.trim() && !/^(~|null)$/i.test(v.trim()) ? v.trim() : "";
+  const raw = str(campoYaml(txt, "vault_path")) || str(campoYaml(txt, "obsidian_vault_path")) || str(campoYaml(txt, "vault_path", "obsidian"));
+  if (!raw) return null;
+  const abs = resolve(home, raw.replace(/^~(?=$|[\\/])/, home));
+  if (!isDir(abs)) return null;
+  let d = abs;
+  for (let i = 0; i < 6; i++) {
+    if (isDir(join2(d, ".obsidian"))) return d;
+    const up = dirname(d);
+    if (up === d || relative(home, up).startsWith("..") || up === home) break;
+    d = up;
+  }
+  return abs;
+}
+function slugLoja(store) {
+  const base = String(store?.slug || store?.name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/, "");
+  return base || "loja";
+}
+function originalPath({ home = homedir(), cofre = cofreDir(home), store, imageId, kind }) {
+  if (!UUID_RE.test(imageId)) throw new Error("image_id inv\xE1lido");
+  const ext = kind === "alpha" ? "-sem-fundo.png" : kind === "original-png" ? ".png" : ".jpg";
+  const base = cofre ? resolve(cofre, "Projetos") : resolve(home, "Iron Office");
+  const dir = resolve(base, slugLoja(store), "marca", "originais");
+  const file = resolve(dir, imageId.slice(0, 8).toLowerCase() + ext);
+  if (!file.startsWith(base + sep)) throw new Error("caminho fora da pasta da loja");
+  return { dir, file };
+}
+
 // src/lock.mjs
-import { linkSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { linkSync, readFileSync as readFileSync3, renameSync, unlinkSync, writeFileSync } from "node:fs";
 var ler = (p) => {
   try {
-    return parseInt(readFileSync2(p, "utf8").trim(), 10);
+    return parseInt(readFileSync3(p, "utf8").trim(), 10);
   } catch {
     return NaN;
   }
@@ -17027,10 +17102,10 @@ async function acquireLockFile({ path, pid, holderAlive: holderAlive2, log: log2
 import { fileURLToPath } from "node:url";
 
 // hooks/shared.mjs
-import { readFileSync as readFileSync3 } from "node:fs";
+import { readFileSync as readFileSync4 } from "node:fs";
 import { createHash } from "node:crypto";
-import { homedir } from "node:os";
-import { join as join2 } from "node:path";
+import { homedir as homedir2 } from "node:os";
+import { join as join3 } from "node:path";
 var SECRET_PATTERNS = [
   /iok_[A-Za-z0-9]+/g,
   // chave do próprio Iron Office
@@ -17092,10 +17167,10 @@ function redactKeys(s, max) {
   const final = Array.from(out);
   return final.length > max ? { text: final.slice(0, max).join(""), cut: true } : { text: out, cut: false };
 }
-function feedOn(home = homedir()) {
+function feedOn(home = homedir2()) {
   let txt;
   try {
-    txt = readFileSync3(join2(home, ".iron", "config.yaml"), "utf8").replace(/^\uFEFF/, "");
+    txt = readFileSync4(join3(home, ".iron", "config.yaml"), "utf8").replace(/^\uFEFF/, "");
   } catch {
     return true;
   }
@@ -17123,7 +17198,23 @@ var TIPOS_BASE = [
 ];
 var PORTEIRO_SEM_NOME = "; n\xE3o consegui ler o nome";
 var PORTEIRO_TIPOS = TIPOS_BASE.flatMap((t) => [t, t + PORTEIRO_SEM_NOME]);
-function porteiroAskCheck(text2, options) {
+function cortadoRegistrado(home, hash, curto) {
+  let linhas;
+  try {
+    linhas = readFileSync4(join3(home, ".iron", "porteiro", "registro.jsonl"), "utf8").split("\n").slice(-300);
+  } catch {
+    return false;
+  }
+  for (const l of linhas) {
+    try {
+      const r = JSON.parse(l);
+      if (r?.decisao === "barrado" && r.hash === hash && r.curto === curto) return true;
+    } catch {
+    }
+  }
+  return false;
+}
+function porteiroAskCheck(text2, options, { home = homedir2() } = {}) {
   const opts = Array.isArray(options) ? options : [];
   if (!opts.some((o) => typeof o?.id === "string" && o.id.startsWith("pt-"))) return null;
   const erro = (e) => ({ ok: false, error: `Pergunta do porteiro fora do modelo: ${e}. Use exatamente o texto e as op\xE7\xF5es que o motivo do porteiro mandou.` });
@@ -17144,17 +17235,18 @@ function porteiroAskCheck(text2, options) {
   }
   if (item === null && t.startsWith("Depois do estudo: instalo ") && t.endsWith("?")) item = t.slice("Depois do estudo: instalo ".length, -1);
   if (!item) return erro("o texto da pergunta mudou");
-  if (porteiroHash(item) !== hash) return erro(`o item "${item}" n\xE3o \xE9 o do id`);
-  return { ok: true };
+  if (porteiroHash(item) === hash) return { ok: true };
+  if (item.endsWith("\u2026") && cortadoRegistrado(home, hash, item)) return { ok: true };
+  return erro(`o item "${item}" n\xE3o \xE9 o do id`);
 }
 
 // src/server.mjs
-var VERSION = "0.28.0";
+var VERSION = "0.29.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
-var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
-var LOCK_DIR = join3(homedir2(), ".iron");
-var LOCK_PATH = join3(LOCK_DIR, "office.lock");
+var KEY_PATH = join4(homedir3(), ".claude", "iron-office-api-key");
+var LOCK_DIR = join4(homedir3(), ".iron");
+var LOCK_PATH = join4(LOCK_DIR, "office.lock");
 var DEFAULT_CONVERSATION = "00000000-0000-0000-0000-000000000001";
 var FAST_MS = 2e3;
 var SLOW_MS = 15e3;
@@ -17175,7 +17267,7 @@ function log(msg) {
 }
 function readKey() {
   try {
-    const buf = readFileSync4(KEY_PATH);
+    const buf = readFileSync5(KEY_PATH);
     const utf16 = buf.length >= 2 && buf[0] === 255 && buf[1] === 254;
     return buf.toString(utf16 ? "utf16le" : "utf8").replace(/[﻿\u0000]/g, "").trim();
   } catch {
@@ -17185,9 +17277,9 @@ function readKey() {
 var API_KEY = readKey();
 var DEGRADED = !API_KEY;
 function run(cmd, args) {
-  return new Promise((resolve) => {
+  return new Promise((resolve2) => {
     execFile(cmd, args, { encoding: "utf8", timeout: 5e3, windowsHide: true }, (err, stdout) => {
-      resolve(err ? null : String(stdout || ""));
+      resolve2(err ? null : String(stdout || ""));
     });
   });
 }
@@ -17256,7 +17348,7 @@ async function acquireLock() {
 }
 function releaseLock() {
   try {
-    if (readFileSync4(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync2(LOCK_PATH);
+    if (readFileSync5(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync2(LOCK_PATH);
   } catch {
   }
 }
@@ -17278,15 +17370,16 @@ function storePrefix(store) {
   const kind = KIND_LABEL[store.kind] ?? "Loja";
   const raw = typeof store.ficha_path === "string" ? store.ficha_path.trim() : "";
   const path = raw && !BAD_FICHA_PATH.test(raw.replace(/\\/g, "/")) && raw.length <= 200 ? redactKeys(raw.replace(/[\]]/g, " "), 200).text : "ainda sem ficha";
-  const id = UUID_RE.test(store.id) ? ` \xB7 id: ${store.id}` : "";
+  const id = UUID_RE2.test(store.id) ? ` \xB7 id: ${store.id}` : "";
   const done = Number.isInteger(store.trail_done) && store.trail_done >= 0 ? ` \xB7 trilha: ${store.trail_done} feita${store.trail_done === 1 ? "" : "s"}` : "";
   const caminho = store.trail_path === "sem_loja" ? " \xB7 caminho: criar a loja" : "";
   return `[loja: ${name} \xB7 ${kind}${id} \xB7 ficha: ${path}${done}${caminho}]
 `;
 }
-var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var PAGE_KINDS = ["landing", "clone", "shopify", "outra", "referencia"];
 var ASK_LINKS = ["dropkiller", "shopify"];
+var Q_IMAGES_MAX = 8;
 var SPY_RESPONSE_MAX = 3e4;
 function pageUrlArg(v) {
   if (typeof v !== "string") return null;
@@ -17423,11 +17516,11 @@ var FIELD_ID_RE = /^[a-z0-9_]{1,24}$/;
 var FIELD_KINDS = ["text", "number", "money", "yesno"];
 function storeArg(args) {
   const v = typeof args.project_id === "string" ? args.project_id.trim() : "";
-  return UUID_RE.test(v) ? v : lastStoreId;
+  return UUID_RE2.test(v) ? v : lastStoreId;
 }
 function explicitStore(args) {
   const v = typeof args.project_id === "string" ? args.project_id.trim() : "";
-  return UUID_RE.test(v) ? v : null;
+  return UUID_RE2.test(v) ? v : null;
 }
 function isMutation(query) {
   return /^mutation\b/.test(query.replace(/^(\s|#[^\n]*\n?|\uFEFF)+/, ""));
@@ -17699,6 +17792,7 @@ var TOOLS = DEGRADED ? [
           items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, kind: { type: "string", enum: FIELD_KINDS } }, required: ["id", "label"] }
         },
         link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um bot\xE3o com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o bot\xE3o n\xE3o aparece, ent\xE3o o texto da pergunta tem que valer sozinho). Nunca uma URL." },
+        images: { type: "array", items: { type: "string" }, description: "Opcional (onda 59): escolha entre imagens = `images` com 1 a 8 ids COMPLETOS da aba Imagens (os do image_generate); o site mostra as miniaturas e o clique volta como 'imagem escolhida: <id>'. Nunca mande link de imagem no `reply` pra escolher. Com images, options e free s\xE3o opcionais." },
         project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da \xFAltima mensagem." }
       },
       required: ["chat_id", "question"]
@@ -17795,6 +17889,19 @@ var TOOLS = DEGRADED ? [
         }
       },
       required: ["project_id", "prompt", "destination"]
+    }
+  },
+  {
+    name: "image_get",
+    description: "Traz pro computador o ARQUIVO ORIGINAL de uma imagem da aba Imagens (onda 59), pelo site, com a chave do aluno: nada de curl, print de tela ou navegador. Use quando chegar 'imagem escolhida: <id>' (clique na miniatura ou no bot\xE3o 'Escolhi esta') ou quando precisar ver/usar uma imagem que o aluno aprovou. Grava numa pasta FIXA (`<cofre>/Projetos/<loja>/marca/originais/<8 primeiros do id>.<ext>`; sem cofre, `~/Iron Office/<loja>/marca/originais/`) e devolve { ok, path, kind, bytes, sha256, project_id }. Leia o arquivo pelo `path` pra ver a imagem. ESTE \xC9 O ARQUIVO ORIGINAL: imagem aprovada n\xE3o se redesenha, n\xE3o se refaz a partir de print e n\xE3o se 'limpa'. kind 'alpha' = o mesmo desenho em PNG sem o fundo (o site recorta fundo liso; fundo com degrad\xEA/foto volta reason 'fundo_nao_liso' e a\xED fica o original). A imagem tem que ser da loja do project_id. S\xF3 ids completos (UUID).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: \u2026])." },
+        image_id: { type: "string", description: "id COMPLETO da imagem (UUID), o que veio em 'imagem escolhida: <id>' ou no image_generate." },
+        kind: { type: "string", enum: ["original", "alpha"], description: "original (padr\xE3o) ou alpha (PNG sem fundo)." }
+      },
+      required: ["project_id", "image_id"]
     }
   },
   {
@@ -17984,7 +18091,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(`Esta sess\xE3o n\xE3o atualiza o Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     }
     const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
-    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
     const rawPath = String(args.ficha_path ?? "").trim().replace(/\\/g, "/");
     if (!rawPath || rawPath.length > 200 || BAD_FICHA_PATH.test(rawPath)) {
       return text("ficha_path tem que ser relativo ao cofre, sem '..' (ex.: Projetos/loja-exemplo/PROJETO.md).", true);
@@ -18010,6 +18117,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!q) return text("question \xE9 obrigat\xF3ria.", true);
     if (q.length > Q_TEXT_MAX) return text(`Pergunta longa demais (${q.length}; m\xE1ximo ${Q_TEXT_MAX}). Encurte e mande uma pergunta s\xF3.`, true);
     const raw = Array.isArray(args.options) ? args.options : [];
+    let images;
+    if (args.images !== void 0) {
+      if (args.fields !== void 0) return text("images n\xE3o vai no formul\xE1rio: mande numa ask sem fields.", true);
+      if (!Array.isArray(args.images) || args.images.length === 0 || args.images.length > Q_IMAGES_MAX) return text(`images: de 1 a ${Q_IMAGES_MAX} ids de imagem.`, true);
+      const list = args.images.map((x) => typeof x === "string" ? x.trim().toLowerCase() : "");
+      if (list.some((x) => !UUID_RE2.test(x))) return text("images: cada item \xE9 o id COMPLETO (UUID) da imagem, o que o image_generate devolveu. Link ou id curto n\xE3o vale.", true);
+      if (new Set(list).size !== list.length) return text("images: id repetido.", true);
+      images = list;
+    }
     if (args.fields !== void 0) {
       if (raw.length > 0) return text("Formul\xE1rio (fields) e op\xE7\xF5es (options) n\xE3o v\xE3o juntos: mande um ou outro.", true);
       if (args.link !== void 0) return text("link n\xE3o vai no formul\xE1rio: mande o link numa ask com options.", true);
@@ -18048,7 +18164,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (raw.length > Q_OPTIONS_MAX) return text(`Op\xE7\xF5es demais (${raw.length}; m\xE1ximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;
-    if (raw.length === 0 && !free) return text("Sem op\xE7\xF5es: passe options (at\xE9 6) ou free=true.", true);
+    if (raw.length === 0 && !free && !images) return text("Sem op\xE7\xF5es: passe options (at\xE9 6), images ou free=true.", true);
     const options = [];
     const ids = /* @__PURE__ */ new Set();
     for (const [i, o] of raw.entries()) {
@@ -18056,7 +18172,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (!label) return text(`Op\xE7\xE3o ${i + 1} vazia.`, true);
       if (label.length > Q_LABEL_MAX) return text(`Op\xE7\xE3o ${i + 1} longa demais (${label.length}; m\xE1ximo ${Q_LABEL_MAX}).`, true);
       const given = typeof o === "object" && o && typeof o.id === "string" ? o.id.trim().toLowerCase() : "";
-      const id = OPTION_ID_RE.test(given) && !ids.has(given) ? given : `o${i + 1}`;
+      const id = OPTION_ID_RE.test(given) && !ids.has(given) && !/^img\d+$/.test(given) ? given : `o${i + 1}`;
       if (ids.has(id)) return text("Op\xE7\xF5es com id repetido.", true);
       ids.add(id);
       options.push({ id, label });
@@ -18067,9 +18183,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const store = storeArg(args);
       const res = await api("/api/chat/messages", {
         method: "POST",
-        body: { conversation_id: chatId || null, text: q, meta: { ...store ? { project_id: store } : {}, question: { text: q, options, free, skip, ...link ? { link } : {} } } }
+        body: { conversation_id: chatId || null, text: q, meta: { ...store ? { project_id: store } : {}, question: { text: q, options, free, skip, ...link ? { link } : {}, ...images ? { images } : {} } } }
       });
-      return text(`Pergunta enviada (id ${res?.id ?? "?"}). Espere a resposta do aluno antes da pr\xF3xima.` + avisosDoAsk(chatId || DEFAULT_CONVERSATION));
+      const comImagens = images ? ` O clique numa miniatura chega como 'imagem escolhida: <id>': a\xED chame image_get com esse id (o arquivo original; nunca redesenhe).` : "";
+      return text(`Pergunta enviada (id ${res?.id ?? "?"}). Espere a resposta do aluno antes da pr\xF3xima.` + comImagens + avisosDoAsk(chatId || DEFAULT_CONVERSATION));
     } catch (e) {
       return text(`Falhou ao enviar a pergunta: ${e.message}`, true);
     }
@@ -18143,7 +18260,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "ads_status") {
     if (mode !== "active") return text(`Esta sess\xE3o n\xE3o grava no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
-    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id do projeto (linha [loja: \u2026] ou shop_status).", true);
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id do projeto (linha [loja: \u2026] ou shop_status).", true);
     const snap = args.snapshot;
     if (!snap || typeof snap !== "object" || Array.isArray(snap)) return text("snapshot tem que ser um objeto (formato na descri\xE7\xE3o da ferramenta).", true);
     const scrubbed = scrubAds(snap);
@@ -18168,7 +18285,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "ads_by_product") {
     if (mode !== "active") return text(`Esta sess\xE3o n\xE3o l\xEA pelo Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
-    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id do projeto (linha [loja: \u2026] ou shop_status).", true);
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id do projeto (linha [loja: \u2026] ou shop_status).", true);
     if (args.days !== 1 && args.days !== 7 && args.days !== 15 && args.days !== 30) return text("days tem que ser 1, 7, 15 ou 30.", true);
     if (!Array.isArray(args.ads)) return text("ads tem que ser a lista das pe\xE7as com gasto.", true);
     if (args.ads.length > 200) return text("No m\xE1ximo 200 pe\xE7as: mande as que mais gastaram.", true);
@@ -18194,7 +18311,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "image_generate") {
     if (mode !== "active") return text(`Esta sess\xE3o n\xE3o gera imagem pelo Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
-    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
     const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
     if (!prompt) return text("Falta o prompt da imagem.", true);
     if (prompt.length > 1e3) return text("O prompt passou de 1.000 caracteres: encurte.", true);
@@ -18217,7 +18334,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
     try {
       const res = await api(`/api/stores/${id}/images`, { method: "POST", body, timeoutMs: 18e4 });
-      const page = (imgId) => typeof imgId === "string" && UUID_RE.test(imgId) ? `${BASE}/images?image=${imgId}` : null;
+      const page = (imgId) => typeof imgId === "string" && UUID_RE2.test(imgId) ? `${BASE}/images?image=${imgId}` : null;
       const imgs = Array.isArray(res.images) ? res.images.slice(0, 4).map((i) => ({ id: i?.id ?? null, url: page(i?.id) })) : [];
       const pick2 = res.dry_run ? { ok: true, dry_run: true, provider: res.provider ?? null, destination: res.destination ?? null, n: res.n ?? n, estimate_usd: res.estimate_usd ?? null, cap_usd: res.cap_usd ?? null, cap_left_usd: res.cap_left_usd ?? null, fits: res.fits ?? null, quote: typeof res.quote === "string" ? res.quote : null, ...refPick(res.reference) } : {
         ok: res.ok === true,
@@ -18229,7 +18346,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         cost_usd: res.cost_usd ?? null,
         cost_kind: res.cost_kind ?? null,
         cap_left_usd: res.cap_left_usd ?? null,
-        ...imgs.length > 1 ? { images: imgs } : {},
+        ...imgs.length > 1 ? { images: imgs, proximo: "Mais de uma imagem: mostre por `ask` com `images` (os ids acima), pergunta 'Qual destas?'. Nunca mande os links no reply pra escolher." } : {},
         ...refPick(res.reference),
         ...res.partial ? { partial: true, generated: res.generated ?? null, saved: res.saved ?? null } : {}
       };
@@ -18246,7 +18363,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "spy_run") {
     if (mode !== "active") return text(`Esta sess\xE3o n\xE3o roda o Spy pelo Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
-    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
     if (!Array.isArray(args.terms) || args.terms.length < 1 || args.terms.length > 3) return text("terms: de 1 a 3 termos de busca.", true);
     const terms = [];
     for (const t of args.terms) {
@@ -18295,8 +18412,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (mode !== "active") return text(`Esta sess\xE3o n\xE3o mexe na Shopify pelo Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     const imageId = typeof args.image_id === "string" ? args.image_id.trim() : "";
     const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
-    if (!UUID_RE.test(imageId)) return text("image_id inv\xE1lido: use o `id` que o image_generate devolveu.", true);
-    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    if (!UUID_RE2.test(imageId)) return text("image_id inv\xE1lido: use o `id` que o image_generate devolveu.", true);
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
     try {
       if (args.remove === true) {
         const res2 = await api(`/api/images/${imageId}/shopify`, { method: "DELETE", timeoutMs: 3e4 });
@@ -18325,7 +18442,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "page_save") {
     if (mode !== "active") return text(`Esta sess\xE3o n\xE3o registra p\xE1ginas no Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
     const id = typeof args.project_id === "string" ? args.project_id.trim() : "";
-    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
     const title = redactKeys(String(args.title ?? "").replace(/\s+/g, " ").trim(), 120).text;
     if (!title) return text("title: o nome da p\xE1gina.", true);
     const kind = PAGE_KINDS.includes(args.kind) ? args.kind : null;
@@ -18343,7 +18460,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const res = await api(`/api/stores/${id}/pages`, { method: "POST", body: { title, kind, ...url ? { url } : {}, ...local_path ? { local_path } : {}, ...note ? { note } : {} }, timeoutMs: 2e4 });
       const pageId = res?.page?.id;
-      if (typeof pageId !== "string" || !UUID_RE.test(pageId)) return text("O Iron Office n\xE3o devolveu o id da p\xE1gina.", true);
+      if (typeof pageId !== "string" || !UUID_RE2.test(pageId)) return text("O Iron Office n\xE3o devolveu o id da p\xE1gina.", true);
       const status = ["no_ar", "rascunho", "fora_do_ar"].includes(res.page.status) ? res.page.status : "rascunho";
       const proximo = kind === "referencia" ? "registre a pr\xF3xima refer\xEAncia; depois da \xFAltima, siga a skill `espiar` (deliver e reply)." : trilhaPViva() ? `reply de 3 linhas (o que fez, o risco maior) \u2192 UM formul\xE1rio (ask com fields) com TODAS as lacunas, do aluno e do fornecedor \u2192 reply de 1 linha com a url da entrega. Quando o formul\xE1rio voltar: v2 pelo deliver (sem novo page_save) e a ask do gate ('Quer que eu rode o gate nessa p\xE1gina?'); no deliver do gate, page_id ${pageId}.` : `${kind === "shopify" ? "depois do sim do aluno pra publicar ou salvar, " : "agora "}a ask 'Quer que eu rode o gate nessa p\xE1gina?' com 'Sim, roda o gate' e 'Depois'; no deliver do gate, page_id ${pageId}.`;
       return text(JSON.stringify({ id: pageId, status, url_aba: `${BASE}/pages?store=${id}&page=${pageId}`, proximo }));
@@ -18353,9 +18470,58 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(`O site n\xE3o registrou a p\xE1gina: ${redactKeys(String(e.message ?? ""), 300).text}`, true);
     }
   }
+  if (name === "image_get") {
+    const id = String(args.project_id ?? "").trim().toLowerCase();
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    const imageId = String(args.image_id ?? "").trim().toLowerCase();
+    if (!UUID_RE2.test(imageId)) return text("image_id: o id COMPLETO (UUID) da imagem, o de 'imagem escolhida: <id>'. Id curto ou link n\xE3o vale.", true);
+    const kind = args.kind === void 0 || args.kind === null ? "original" : args.kind;
+    if (kind !== "original" && kind !== "alpha") return text("kind: original ou alpha.", true);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 45e3);
+    try {
+      const res = await fetch(`${BASE}/api/images/${imageId}/file?kind=${kind}`, { headers: { "x-api-key": API_KEY }, signal: ctrl.signal });
+      if (res.status === 401) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
+      if (!res.ok) {
+        const j0 = await res.json().catch(() => null);
+        const j = j0 && typeof j0 === "object" ? j0 : {};
+        if (res.status === 404) return text("Imagem n\xE3o encontrada nesta conta (apagada ou de outra conta). Confira o id na aba Imagens.", true);
+        if (res.status === 422) return text(JSON.stringify({ ok: false, reason: typeof j.reason === "string" ? j.reason.slice(0, 40) : "sem_recorte", error: String(j.error ?? "").slice(0, 240), proximo: "Fica o original (kind original). Diga ao aluno a frase do `error`, com todas as letras: o recorte sem fundo, aqui, mudaria o desenho; se ele precisar, um designer recorta a partir do original." }));
+        return text(`N\xE3o deu pra trazer a imagem: ${String(j.error ?? `HTTP ${res.status}`).slice(0, 200)}`, true);
+      }
+      if ((res.headers.get("x-image-project") ?? "").toLowerCase() !== id) return text("Essa imagem \xE9 de outra loja desta conta: confira a loja do pedido (linha [loja: \u2026]).", true);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (!buf.length || buf.length > 15 * 1024 * 1024) return text("O site devolveu um arquivo vazio ou grande demais.", true);
+      const png = /png/i.test(res.headers.get("content-type") ?? "");
+      let store = null;
+      try {
+        const l = await api("/api/shopify/graphql?stores=1");
+        store = Array.isArray(l?.stores) ? l.stores.find((x) => x?.project_id === id) ?? null : null;
+      } catch {
+      }
+      const { dir, file } = originalPath({ store: store ?? { slug: id.slice(0, 8) }, imageId, kind: kind === "alpha" ? "alpha" : png ? "original-png" : "original" });
+      mkdirSync(dir, { recursive: true });
+      writeFileSync2(file, buf);
+      const sha256 = createHash2("sha256").update(buf).digest("hex");
+      return text(JSON.stringify({
+        ok: true,
+        path: file,
+        kind,
+        bytes: buf.length,
+        sha256,
+        project_id: id,
+        nota: kind === "alpha" ? "PNG sem fundo do MESMO desenho (recorte do site, pixel a pixel). \xC9 o logo oficial em imagem. N\xE3o redesenhe." : "Este \xE9 o arquivo ORIGINAL que o aluno aprovou. Leia pelo path pra ver. N\xE3o redesenhe, n\xE3o refa\xE7a a partir de print, n\xE3o 'limpe' letra."
+      }));
+    } catch (e) {
+      if (e?.name === "AbortError") return text("O site demorou demais pra mandar a imagem; tente de novo em 1 minuto.", true);
+      return text(`N\xE3o deu pra trazer a imagem: ${String(e?.message ?? e).slice(0, 200)}`, true);
+    } finally {
+      clearTimeout(t);
+    }
+  }
   if (name === "store_speed") {
     const id = String(args.project_id ?? "").trim();
-    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
     try {
       const res = await api(`/api/stores/${id}/speed`, { timeoutMs: 7e4 });
       return text(JSON.stringify({ url: res.url ?? null, score: res.score ?? null, top3: Array.isArray(res.top3) ? res.top3.slice(0, 3) : [] }));
@@ -18367,7 +18533,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
   if (name === "operation_status") {
     const id = String(args.project_id ?? "").trim();
-    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
     const days = args.days === void 0 || args.days === null ? 7 : args.days;
     if (![1, 7, 15, 30].includes(days)) return text("days tem que ser 1, 7, 15 ou 30.", true);
     try {
@@ -18448,12 +18614,12 @@ function porteiroResposta(meta2) {
   const [, acao, hash] = m;
   if (acao === "instalar") {
     try {
-      const dir = join3(homedir2(), ".iron", "porteiro");
+      const dir = join4(homedir3(), ".iron", "porteiro");
       mkdirSync(dir, { recursive: true, mode: 448 });
-      const file = join3(dir, "liberados.json");
+      const file = join4(dir, "liberados.json");
       let arr = [];
       try {
-        const old = JSON.parse(readFileSync4(file, "utf8"));
+        const old = JSON.parse(readFileSync5(file, "utf8"));
         if (Array.isArray(old)) arr = old;
       } catch {
       }
@@ -18510,7 +18676,7 @@ async function pullOnce() {
       if (!system && formularioEstado(chatId) === "aberto") formularioMarca(chatId, "voltou");
       if (!system && ADS_REFRESH_RE.test(content)) adsRefresh.set(chatId, { ts: Date.now(), avisos: 0, project: store?.id ?? null, soHoje: /· hoje\s*$/i.test(content) });
       toAck.push(m.id);
-      lastStoreId = store && UUID_RE.test(store.id) ? store.id : null;
+      lastStoreId = store && UUID_RE2.test(store.id) ? store.id : null;
     }
   }
   if (toAck.length > 0) {
@@ -18586,7 +18752,7 @@ function strList(v) {
 function readJson(path) {
   let text2;
   try {
-    text2 = readFileSync4(path, "utf8");
+    text2 = readFileSync5(path, "utf8");
   } catch {
     return null;
   }
@@ -18596,14 +18762,14 @@ function readJson(path) {
     return void 0;
   }
 }
-function mcpServerNames(home = homedir2(), cwd = process.cwd(), env = process.env) {
-  const user = readJson(join3(home, ".claude.json"));
+function mcpServerNames(home = homedir3(), cwd = process.cwd(), env = process.env) {
+  const user = readJson(join4(home, ".claude.json"));
   if (user === void 0) return null;
   const proj = user?.projects && typeof user.projects === "object" ? user.projects[cwd] : null;
   const p = proj && typeof proj === "object" ? proj : {};
   const offJson = new Set(strList(p.disabledMcpjsonServers));
   const onJson = new Set(strList(p.enabledMcpjsonServers));
-  const mcpJson = readJson(join3(cwd, ".mcp.json"));
+  const mcpJson = readJson(join4(cwd, ".mcp.json"));
   if (mcpJson === void 0) return null;
   const fromJson = mcpKeys(mcpJson).filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
   const off = new Set(strList(p.disabledMcpServers));
@@ -18690,7 +18856,7 @@ async function maybeStart() {
   }, RETAKE_MS);
   retake.unref();
 }
-var BYE_SCRIPT = join3(dirname(fileURLToPath(import.meta.url)), "bye.mjs");
+var BYE_SCRIPT = join4(dirname2(fileURLToPath(import.meta.url)), "bye.mjs");
 async function byeOnce() {
   if (mode !== "active" || !API_KEY) return;
   if (presenceTimer) clearInterval(presenceTimer);
