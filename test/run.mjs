@@ -2586,7 +2586,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(1500);
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
   const ins = init?.instructions ?? "";
-  check("57 initialize → 0.27.0 e bloco em 3899 (≤ 3900), com 'criar loja → `office-fluxos`'", init?.serverInfo?.version === "0.27.0" && ins.length === BLOCO_ATUAL && ins.length <= 3900 && ins.includes("criar loja → `office-fluxos`"), `${init?.serverInfo?.version} ${ins.length}`);
+  check("57 initialize → versão atual e bloco em 3899 (≤ 3900), com 'criar loja → `office-fluxos`'", init?.serverInfo?.version === VERSAO_ATUAL && ins.length === BLOCO_ATUAL && ins.length <= 3900 && ins.includes("criar loja → `office-fluxos`"), `${init?.serverInfo?.version} ${ins.length}`);
   s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   await sleep(400);
   const tools = s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? [];
@@ -2643,6 +2643,52 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("57 office-fluxos: seção de criar loja com link 'shopify', 'Já criei a loja' · 'Agora não', cliente sem botão, ≤ 8000", SK.includes("## Criar a loja na Shopify") && SK.includes('link: "shopify"') && SK.includes("Já criei a loja") && SK.includes("Agora não") && SK.includes("kind: cliente") && SK.length <= 8000, String(SK.length));
   s.p.kill();
   f.close?.();
+}
+
+// ─── onda 58 (0.28.0): operation_status lê a operação COD pelo site ───
+{
+  console.log("onda 58 (0.28.0)");
+  const OK_ID = "11111111-1111-4111-8111-111111111111", SEM = "22222222-2222-4222-8222-222222222222", ERRO = "33333333-3333-4333-8333-333333333333", LONGE = "44444444-4444-4444-8444-444444444444";
+  const RET = { operator: "mastershop", window_days: 15, currency: "COP", sales_net: 1000, sales_count: 2, charges: [{ label: "Cobro TOKEN=abc123456789", amount: -10, count: 1 }], charges_total: -10, other_income: 0, withdrawals: -500, balance: 400, orders: { a_caminho: 3 }, in_transit_potential: 300, truncated: false };
+  const pth = (x) => String(x).split("?")[0];
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (pth(c.path) === `/api/stores/${OK_ID}/operation`) return { json: { ok: true, connected: true, operator: "mastershop", window_days: 15, retrato: RET, ads: { spend: 900, currency: "BRL", saved_at: "x" }, fx: { from: "COP", to: "BRL", rate: 0.0017, at: "x" }, profit: -898.3, profit_currency: "BRL", phrase: "Nos últimos 15 dias entrou R$ 1,70 da operação e saiu R$ 900,00 em anúncio. Faltou R$ 898,30.", in_transit: "Entrou = pedidos entregues e pagos no período. Ainda a caminho: 3 pedidos.", reason: null, extra: "não passa" } };
+    if (pth(c.path) === `/api/stores/${SEM}/operation`) return { json: { ok: true, connected: false, operator: null, window_days: 7, retrato: null, ads: null, fx: null, profit: null, profit_currency: null, phrase: null, in_transit: null, reason: "sem_operacao" } };
+    if (pth(c.path) === `/api/stores/${ERRO}/operation`) return { status: 503, json: { ok: false, connected: true, error: "A Master não deixou a conexão passar agora. Tente de novo em alguns minutos." } };
+    if (pth(c.path) === `/api/stores/${LONGE}/operation`) return { status: 404, json: { error: "Loja não encontrada." } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const result = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => result(s, id)?.content?.[0]?.text ?? "";
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
+  check("58 initialize → 0.28.0 e o bloco de instruções intocado (3899, sem gatilho novo)", init?.serverInfo?.version === "0.28.0" && VERSAO_ATUAL === "0.28.0" && (init?.instructions ?? "").length === 3899 && !(init?.instructions ?? "").includes("operation_status"), `${init?.serverInfo?.version} ${(init?.instructions ?? "").length}`);
+  s.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+  call(s, 3, "operation_status", { project_id: OK_ID, days: 15 });
+  call(s, 4, "operation_status", { project_id: SEM });
+  call(s, 5, "operation_status", { project_id: OK_ID, days: 90 });
+  call(s, 6, "operation_status", { project_id: "../x" });
+  call(s, 7, "operation_status", { project_id: ERRO });
+  call(s, 8, "operation_status", { project_id: LONGE });
+  call(s, 9, "operation_status", { project_id: OK_ID, days: "7" });
+  await sleep(1000);
+  const tool = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "operation_status");
+  check("58 operation_status existe, project_id obrigatório, days em [1, 7, 15, 30], descrição diz não recalcular, saque e a caminho", !!tool && tool.inputSchema.required.includes("project_id") && JSON.stringify(tool.inputSchema.properties.days.enum) === "[1,7,15,30]" && /NUNCA recalcule/.test(tool.description) && /Saque/.test(tool.description) && /a caminho/.test(tool.description) && /Integrações/.test(tool.description) && /anuncios_velhos/.test(tool.description) && /truncated/.test(tool.description), JSON.stringify(tool?.inputSchema));
+  const hits = f.calls.filter((c) => pth(c.path).endsWith("/operation"));
+  let ok = {};
+  try { ok = JSON.parse(txt(s, 3)); } catch {}
+  check("58 chama GET /api/stores/<id>/operation?window=15 com a chave e repassa os números como vieram", hits.some((h) => h.path === `/api/stores/${OK_ID}/operation?window=15` && h.method === "GET" && h.key === KEY) && ok.connected === true && ok.profit === -898.3 && ok.profit_currency === "BRL" && /Faltou/.test(ok.phrase) && /a caminho/.test(ok.in_transit) && ok.retrato?.sales_net === 1000 && ok.extra === undefined, JSON.stringify({ hits: hits.map((h) => h.path), ok }));
+  check("58 o nome da cobrança passa pelo filtro um a um e o JSON segue válido", ok.retrato?.charges?.length === 1 && !/abc123456789/.test(txt(s, 3)), txt(s, 3).slice(0, 300));
+  let sem = {};
+  try { sem = JSON.parse(txt(s, 4)); } catch {}
+  check("58 connected false passa adiante (padrão 7 dias)", result(s, 4)?.isError !== true && sem.connected === false && sem.reason === "sem_operacao", txt(s, 4));
+  check("58 days fora da lista (90, '7') e project_id inválido → recusados sem rede", result(s, 5)?.isError === true && result(s, 9)?.isError === true && result(s, 6)?.isError === true && !hits.some((h) => /window=90|window=%227/.test(h.path)) && hits.filter((h) => pth(h.path) === `/api/stores/${OK_ID}/operation`).length === 1, `${txt(s, 5)} | ${txt(s, 9)} | ${txt(s, 6)}`);
+  check("58 erro do site vira 1 linha em português, com isError", result(s, 7)?.isError === true && /^Não deu pra ler a operação: A Master não deixou a conexão passar agora/.test(txt(s, 7)) && !txt(s, 7).includes("\n") && result(s, 8)?.isError === true && /loja não encontrada nesta conta/.test(txt(s, 8)), `${txt(s, 7)} | ${txt(s, 8)}`);
+  s.p.kill();
+  f.srv.close();
 }
 
 for (const d of lixo) {

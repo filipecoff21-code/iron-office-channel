@@ -17149,7 +17149,7 @@ function porteiroAskCheck(text2, options) {
 }
 
 // src/server.mjs
-var VERSION = "0.27.0";
+var VERSION = "0.28.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join3(homedir2(), ".claude", "iron-office-api-key");
@@ -17756,6 +17756,18 @@ var TOOLS = DEGRADED ? [
     }
   },
   {
+    name: "operation_status",
+    description: "Diz se a loja d\xE1 lucro (onda 58): o SITE l\xEA a opera\xE7\xE3o de pagamento na entrega (Master Shop, com a chave que fica cifrada no servidor e nunca vem pra c\xE1) e junta com o gasto da Meta do MESMO per\xEDodo, do retrato de an\xFAncios j\xE1 guardado. Devolve { connected, operator, window_days, retrato: { sales_net, sales_count, charges, charges_total, other_income, withdrawals, balance, orders, in_transit_potential, currency, truncated }, ads: { spend, currency, saved_at } | null, fx, profit, profit_currency, phrase, in_transit, reason }. Copie os n\xFAmeros e a `phrase` como vieram: NUNCA recalcule nem converta moeda por conta pr\xF3pria. Saque (withdrawals) n\xE3o \xE9 lucro: \xE9 dinheiro que j\xE1 era do aluno. Pedido 'a caminho' ainda n\xE3o entrou: diga sempre a linha `in_transit`. profit null: reason 'sem_anuncios' ou 'anuncios_velhos' (o retrato de an\xFAncios desse per\xEDodo falta ou venceu: atualize-o antes, pela skill `anuncios`, e chame de novo) ou 'sem_cotacao' (mostre os dois lados, cada um na sua moeda). retrato.truncated true = leitura parcial: diga que pode faltar movimento (a `phrase` j\xE1 come\xE7a assim). connected false = a loja n\xE3o tem opera\xE7\xE3o conectada: ofere\xE7a em 1 linha conectar a Master Shop em Integra\xE7\xF5es (ironoffice.app/integrations). S\xF3 agregados: nenhum cliente, pedido ou chave volta.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: \u2026] ou do shop_status)." },
+        days: { type: "integer", enum: [1, 7, 15, 30], description: "per\xEDodo contando hoje (1 = hoje); padr\xE3o 7." }
+      },
+      required: ["project_id"]
+    }
+  },
+  {
     name: "image_generate",
     description: "Gera imagem da loja pelo Iron Office (skill `imagens`): o SITE chama o provedor (OpenAI gpt-image-2 ou fal flux/dev) com a chave do aluno, que fica cifrada no servidor e nunca vem pra c\xE1; recorta pro destino e guarda na aba Imagens da loja. SEMPRE: 1) chame com dry_run: true pra saber o custo (estimate_usd), o saldo do dia (cap_left_usd) e receber o `quote` (or\xE7amento, vale 15 min); 2) pergunte ao aluno pelo `ask` \"Vai custar \u2248 US$ X na sua conta da <provedor>. Gero?\" e s\xF3 gere no Sim, mandando o MESMO pedido com o `quote` (sem ele, ou com outro pedido, o site n\xE3o gera: reason 'sem or\xE7amento'). Destinos: feed 1080\xD71350 \xB7 story 1080\xD71920 \xB7 quadrado 1080\xD71080 \xB7 banner 1920\xD71080. Resposta: { ok, id, url (link da imagem na aba Imagens do site; mande esse, nunca outro), width, height, provider, cost_usd, cost_kind (estimado|medido), cap_left_usd, images (com n > 1), partial? } ou { ok: false, reason: 'sem provedor' | 'sem or\xE7amento' | 'limite do dia' | 'por minuto' | 'provedor recusou' | 'provedor fora' | 'sem resposta' | 'gravar', error }. 'provedor fora', 'sem resposta' e 'gravar' podem ter cobrado: mande o aluno conferir a aba Imagens antes de pedir de novo. O prompt passa por filtro (e-mail, telefone e chave viram [removido]). Leva at\xE9 2 min. S\xF3 na sess\xE3o aberta com ironoffice.",
     inputSchema: {
@@ -18351,6 +18363,34 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
       const why = e.message === "sem chave" ? "a nota de velocidade ainda n\xE3o est\xE1 ligada no site (falta a chave do Google do dono)" : e.message === "limite" ? "o Google limitou as medidas agora; tente de novo mais tarde" : e.message === "loja sem Shopify" ? "essa loja n\xE3o tem a Shopify conectada" : e.message === "loja com senha" ? "a loja ainda est\xE1 com senha, e a nota seria da tela de senha; tire a senha (Loja virtual \u2192 Prefer\xEAncias) e me pe\xE7a de novo" : e.status === 404 ? "loja n\xE3o encontrada nesta conta (confira o project_id no shop_status)" : e.name === "AbortError" ? "o PageSpeed demorou demais; tente de novo em 1 minuto" : e.message;
       return text(`N\xE3o deu pra medir a velocidade: ${String(why).replace(/[.\s]+$/, "")}.`, true);
+    }
+  }
+  if (name === "operation_status") {
+    const id = String(args.project_id ?? "").trim();
+    if (!UUID_RE.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    const days = args.days === void 0 || args.days === null ? 7 : args.days;
+    if (![1, 7, 15, 30].includes(days)) return text("days tem que ser 1, 7, 15 ou 30.", true);
+    try {
+      const res = await api(`/api/stores/${id}/operation?window=${days}`, { timeoutMs: 7e4 });
+      const out = {
+        connected: res.connected === true,
+        operator: res.operator ?? null,
+        window_days: res.window_days ?? days,
+        // o nome do tipo de cobrança vem da operadora: passa pelo filtro um a um (o filtro sobre o JSON inteiro estraga o JSON)
+        retrato: res.retrato && typeof res.retrato === "object" ? { ...res.retrato, charges: Array.isArray(res.retrato.charges) ? res.retrato.charges.slice(0, 6).map((c) => ({ ...c, label: redactKeys(String(c?.label ?? ""), 80).text })) : [] } : null,
+        ads: res.ads ?? null,
+        fx: res.fx ?? null,
+        profit: typeof res.profit === "number" ? res.profit : null,
+        profit_currency: res.profit_currency ?? null,
+        phrase: res.phrase ?? null,
+        in_transit: res.in_transit ?? null,
+        reason: res.reason ?? null
+      };
+      return text(JSON.stringify(out));
+    } catch (e) {
+      if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
+      const why = e.status === 404 ? "loja n\xE3o encontrada nesta conta (confira o project_id no shop_status)" : e.name === "AbortError" ? "a opera\xE7\xE3o demorou demais pra responder; tente de novo em 1 minuto" : redactKeys(String(e.message ?? ""), 300).text;
+      return text(`N\xE3o deu pra ler a opera\xE7\xE3o: ${String(why).replace(/[.\s]+$/, "")}.`, true);
     }
   }
   if (name === "shop_query") {

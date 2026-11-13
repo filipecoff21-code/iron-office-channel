@@ -15,7 +15,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.27.0";
+const VERSION = "0.28.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -741,6 +741,19 @@ const TOOLS = DEGRADED
         },
       },
       {
+        name: "operation_status",
+        description:
+          "Diz se a loja dá lucro (onda 58): o SITE lê a operação de pagamento na entrega (Master Shop, com a chave que fica cifrada no servidor e nunca vem pra cá) e junta com o gasto da Meta do MESMO período, do retrato de anúncios já guardado. Devolve { connected, operator, window_days, retrato: { sales_net, sales_count, charges, charges_total, other_income, withdrawals, balance, orders, in_transit_potential, currency, truncated }, ads: { spend, currency, saved_at } | null, fx, profit, profit_currency, phrase, in_transit, reason }. Copie os números e a `phrase` como vieram: NUNCA recalcule nem converta moeda por conta própria. Saque (withdrawals) não é lucro: é dinheiro que já era do aluno. Pedido 'a caminho' ainda não entrou: diga sempre a linha `in_transit`. profit null: reason 'sem_anuncios' ou 'anuncios_velhos' (o retrato de anúncios desse período falta ou venceu: atualize-o antes, pela skill `anuncios`, e chame de novo) ou 'sem_cotacao' (mostre os dois lados, cada um na sua moeda). retrato.truncated true = leitura parcial: diga que pode faltar movimento (a `phrase` já começa assim). connected false = a loja não tem operação conectada: ofereça em 1 linha conectar a Master Shop em Integrações (ironoffice.app/integrations). Só agregados: nenhum cliente, pedido ou chave volta.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: …] ou do shop_status)." },
+            days:       { type: "integer", enum: [1, 7, 15, 30], description: "período contando hoje (1 = hoje); padrão 7." },
+          },
+          required: ["project_id"],
+        },
+      },
+      {
         name: "image_generate",
         description:
           "Gera imagem da loja pelo Iron Office (skill `imagens`): o SITE chama o provedor (OpenAI gpt-image-2 ou fal flux/dev) com a chave do aluno, que fica cifrada no servidor e nunca vem pra cá; recorta pro destino e guarda na aba Imagens da loja. SEMPRE: 1) chame com dry_run: true pra saber o custo (estimate_usd), o saldo do dia (cap_left_usd) e receber o `quote` (orçamento, vale 15 min); 2) pergunte ao aluno pelo `ask` \"Vai custar ≈ US$ X na sua conta da <provedor>. Gero?\" e só gere no Sim, mandando o MESMO pedido com o `quote` (sem ele, ou com outro pedido, o site não gera: reason 'sem orçamento'). Destinos: feed 1080×1350 · story 1080×1920 · quadrado 1080×1080 · banner 1920×1080. Resposta: { ok, id, url (link da imagem na aba Imagens do site; mande esse, nunca outro), width, height, provider, cost_usd, cost_kind (estimado|medido), cap_left_usd, images (com n > 1), partial? } ou { ok: false, reason: 'sem provedor' | 'sem orçamento' | 'limite do dia' | 'por minuto' | 'provedor recusou' | 'provedor fora' | 'sem resposta' | 'gravar', error }. 'provedor fora', 'sem resposta' e 'gravar' podem ter cobrado: mande o aluno conferir a aba Imagens antes de pedir de novo. O prompt passa por filtro (e-mail, telefone e chave viram [removido]). Leva até 2 min. Só na sessão aberta com ironoffice.",
@@ -1385,6 +1398,40 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         : e.name === "AbortError" ? "o PageSpeed demorou demais; tente de novo em 1 minuto"
         : e.message;
       return text(`Não deu pra medir a velocidade: ${String(why).replace(/[.\s]+$/, "")}.`, true);
+    }
+  }
+
+  // 0.28.0 (onda 58): a operação COD lida pelo site; a chave da Master nunca passa pela máquina do aluno
+  if (name === "operation_status") {
+    const id = String(args.project_id ?? "").trim();
+    if (!UUID_RE.test(id)) return text("project_id inválido: use o id da loja (linha [loja: …] ou shop_status).", true);
+    const days = args.days === undefined || args.days === null ? 7 : args.days;
+    if (![1, 7, 15, 30].includes(days)) return text("days tem que ser 1, 7, 15 ou 30.", true);
+    try {
+      const res = await api(`/api/stores/${id}/operation?window=${days}`, { timeoutMs: 70_000 });
+      const out = {
+        connected: res.connected === true,
+        operator: res.operator ?? null,
+        window_days: res.window_days ?? days,
+        // o nome do tipo de cobrança vem da operadora: passa pelo filtro um a um (o filtro sobre o JSON inteiro estraga o JSON)
+        retrato: res.retrato && typeof res.retrato === "object"
+          ? { ...res.retrato, charges: Array.isArray(res.retrato.charges) ? res.retrato.charges.slice(0, 6).map(c => ({ ...c, label: redactKeys(String(c?.label ?? ""), 80).text })) : [] }
+          : null,
+        ads: res.ads ?? null,
+        fx: res.fx ?? null,
+        profit: typeof res.profit === "number" ? res.profit : null,
+        profit_currency: res.profit_currency ?? null,
+        phrase: res.phrase ?? null,
+        in_transit: res.in_transit ?? null,
+        reason: res.reason ?? null,
+      };
+      return text(JSON.stringify(out));
+    } catch (e) {
+      if (e instanceof AuthError) return text("Chave do Iron Office inválida: refaça o passo 2 em ironoffice.app/onboarding.", true);
+      const why = e.status === 404 ? "loja não encontrada nesta conta (confira o project_id no shop_status)"
+        : e.name === "AbortError" ? "a operação demorou demais pra responder; tente de novo em 1 minuto"
+        : redactKeys(String(e.message ?? ""), 300).text;
+      return text(`Não deu pra ler a operação: ${String(why).replace(/[.\s]+$/, "")}.`, true);
     }
   }
 
