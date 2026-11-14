@@ -17,7 +17,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.29.0";
+const VERSION = "0.29.1";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -684,6 +684,7 @@ const TOOLS = DEGRADED
             },
             link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um botão com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o botão não aparece, então o texto da pergunta tem que valer sozinho). Nunca uma URL." },
             images: { type: "array", items: { type: "string" }, description: "Opcional (onda 59): escolha entre imagens = `images` com 1 a 8 ids COMPLETOS da aba Imagens (os do image_generate); o site mostra as miniaturas e o clique volta como 'imagem escolhida: <id>'. Nunca mande link de imagem no `reply` pra escolher. Com images, options e free são opcionais." },
+            vector: { type: "string", description: "Opcional (0.29.1): depois do image_vectorize, `vector` = o id COMPLETO da imagem. O site troca a pergunta por 'O vetor ficou igual ao seu logo?' com os botões 'Sim, ficou igual' e 'Não ficou igual' (o Sim aprova com a sessão do aluno). Vai sozinho: sem options, fields, images ou link." },
             project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da última mensagem." },
           },
           required: ["chat_id", "question"],
@@ -792,13 +793,26 @@ const TOOLS = DEGRADED
       {
         name: "image_get",
         description:
-          "Traz pro computador o ARQUIVO ORIGINAL de uma imagem da aba Imagens (onda 59), pelo site, com a chave do aluno: nada de curl, print de tela ou navegador. Use quando chegar 'imagem escolhida: <id>' (clique na miniatura ou no botão 'Escolhi esta') ou quando precisar ver/usar uma imagem que o aluno aprovou. Grava numa pasta FIXA (`<cofre>/Projetos/<loja>/marca/originais/<8 primeiros do id>.<ext>`; sem cofre, `~/Iron Office/<loja>/marca/originais/`) e devolve { ok, path, kind, bytes, sha256, project_id }. Leia o arquivo pelo `path` pra ver a imagem. ESTE É O ARQUIVO ORIGINAL: imagem aprovada não se redesenha, não se refaz a partir de print e não se 'limpa'. kind 'alpha' = o mesmo desenho em PNG sem o fundo (o site recorta fundo liso; fundo com degradê/foto volta reason 'fundo_nao_liso' e aí fica o original). A imagem tem que ser da loja do project_id. Só ids completos (UUID).",
+          "Traz pro computador o ARQUIVO ORIGINAL de uma imagem da aba Imagens (onda 59), pelo site, com a chave do aluno: nada de curl, print de tela ou navegador. Use quando chegar 'imagem escolhida: <id>' (clique na miniatura ou no botão 'Escolhi esta') ou quando precisar ver/usar uma imagem que o aluno aprovou. Grava numa pasta FIXA (`<cofre>/Projetos/<loja>/marca/originais/<8 primeiros do id>.<ext>`; sem cofre, `~/Iron Office/<loja>/marca/originais/`) e devolve { ok, path, kind, bytes, sha256, project_id }. Leia o arquivo pelo `path` pra ver a imagem. ESTE É O ARQUIVO ORIGINAL: imagem aprovada não se redesenha, não se refaz a partir de print e não se 'limpa'. kind 'alpha' = o mesmo desenho em PNG sem o fundo (o site recorta fundo liso; fundo com degradê/foto volta reason 'fundo_nao_liso' e aí fica o original). kind 'svg', 'svg-preto', 'svg-branco' (0.29.1) = o vetor que o ALUNO aprovou na comparação, gravado em `marca/vetor/`; sem a aprovação dele o site responde que ainda não aprovou: mande a comparação (image_vectorize) e pergunte. NUNCA trace, converta ou redesenhe uma imagem por conta própria: sem script de traçado, sem traçador que já esteja na máquina, sem instalar um, sem converter por código, sem redesenhar. Vetor, 'sem fundo', 'em preto' e 'em branco' de imagem gerada só saem por image_vectorize e image_get. Recusa (infiel, fora_da_classe, fundo_nao_liso): diga a frase do `error` e pare. A imagem tem que ser da loja do project_id. Só ids completos (UUID).",
         inputSchema: {
           type: "object",
           properties: {
             project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: …])." },
             image_id:   { type: "string", description: "id COMPLETO da imagem (UUID), o que veio em 'imagem escolhida: <id>' ou no image_generate." },
-            kind:       { type: "string", enum: ["original", "alpha"], description: "original (padrão) ou alpha (PNG sem fundo)." },
+            kind:       { type: "string", enum: ["original", "alpha", "svg", "svg-preto", "svg-branco"], description: "original (padrão), alpha (PNG sem fundo) ou o vetor aprovado pelo aluno: svg (na cor), svg-preto, svg-branco." },
+          },
+          required: ["project_id", "image_id"],
+        },
+      },
+      {
+        name: "image_vectorize",
+        description:
+          "0.29.1 (onda 59.1): o SITE faz o vetor (SVG) de um logo de UMA cor sobre fundo liso, a partir do arquivo original, e mede se ficou igual (régua do site). Use quando o aluno pedir vetor, SVG, 'vetorize a logo', logo em preto ou em branco. Resposta: { ok: true, fidelity, compare_url, proximo } — aí mande o compare_url no `reply` e pergunte por `ask` com `vector: <image_id>` (o site põe a pergunta 'O vetor ficou igual ao seu logo?' e os botões; só o clique do aluno aprova). Depois do 'Sim, ficou igual', chame image_get com kind svg, svg-preto e svg-branco. 'Não ficou igual': fica a imagem original, e o vetor fica para um designer. Recusa: { ok: false, reason: 'fora_da_classe' | 'infiel' | 'fundo_nao_liso' | 'grande_demais' | 'sem_desenho' | 'recusado' ('recusado' = o aluno disse 'Não ficou igual'), error }. NUNCA trace, converta ou redesenhe uma imagem por conta própria: sem script de traçado, sem traçador que já esteja na máquina, sem instalar um, sem converter por código, sem redesenhar. Vetor, 'sem fundo', 'em preto' e 'em branco' de imagem gerada só saem por image_vectorize e image_get. Recusa (infiel, fora_da_classe, fundo_nao_liso): diga a frase do `error` e pare. Só na sessão aberta com ironoffice.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: …])." },
+            image_id:   { type: "string", description: "id COMPLETO da imagem (UUID), o de 'imagem escolhida: <id>'." },
           },
           required: ["project_id", "image_id"],
         },
@@ -1039,6 +1053,22 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!q) return text("question é obrigatória.", true);
     if (q.length > Q_TEXT_MAX) return text(`Pergunta longa demais (${q.length}; máximo ${Q_TEXT_MAX}). Encurte e mande uma pergunta só.`, true);
     const raw = Array.isArray(args.options) ? args.options : [];
+    // 0.29.1 (onda 59.1): a pergunta do vetor. O site monta texto e botões; o Sim aprova com a SESSÃO do aluno
+    if (args.vector !== undefined) {
+      const v = typeof args.vector === "string" ? args.vector.trim().toLowerCase() : "";
+      if (!UUID_RE.test(v)) return text("vector: o id COMPLETO (UUID) da imagem do image_vectorize.", true);
+      if (args.fields !== undefined || args.images !== undefined || args.link !== undefined || raw.length > 0) return text("vector vai sozinho: sem options, fields, images ou link (o site põe os botões).", true);
+      try {
+        const store = storeArg(args);
+        const res = await api("/api/chat/messages", {
+          method: "POST",
+          body: { conversation_id: chatId || null, text: "O vetor ficou igual ao seu logo?", meta: { ...(store ? { project_id: store } : {}), question: { text: "O vetor ficou igual ao seu logo?", vector: v } } },
+        });
+        return text(`Pergunta do vetor enviada (id ${res?.id ?? "?"}). Espere o aluno. 'Sim, ficou igual' = o site já gravou a aprovação: chame image_get com kind svg, svg-preto e svg-branco. 'Não ficou igual' = fica a imagem original; o vetor fica para um designer. Nunca trace por conta própria.` + avisosDoAsk(chatId || DEFAULT_CONVERSATION));
+      } catch (e) {
+        return text(`Falhou ao enviar a pergunta: ${e.message}`, true);
+      }
+    }
     // 0.29.0 (onda 59): escolher entre imagens é clicar na miniatura; aqui só ids completos (o site confere o dono)
     let images;
     if (args.images !== undefined) {
@@ -1412,6 +1442,36 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
   }
 
+  // 0.29.1 (onda 59.1): o vetor do logo de uma tinta é feito e medido pelo SITE; o aluno aprova olhando
+  if (name === "image_vectorize") {
+    if (mode !== "active") return text(`Esta sessão não pede vetor ao Iron Office (modo: ${MODE_LABEL[mode]}).`, true);
+    const id = String(args.project_id ?? "").trim().toLowerCase();
+    if (!UUID_RE.test(id)) return text("project_id inválido: use o id da loja (linha [loja: …] ou shop_status).", true);
+    const imageId = String(args.image_id ?? "").trim().toLowerCase();
+    if (!UUID_RE.test(imageId)) return text("image_id: o id COMPLETO (UUID) da imagem, o de 'imagem escolhida: <id>'. Id curto ou link não vale.", true);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 90_000);
+    try {
+      const res = await fetch(`${BASE}/api/images/${imageId}/vector`, { method: "POST", headers: { "x-api-key": API_KEY }, signal: ctrl.signal });
+      if (res.status === 401) return text("Chave do Iron Office inválida: refaça o passo 2 em ironoffice.app/onboarding.", true);
+      const j0 = await res.json().catch(() => null);
+      const j = j0 && typeof j0 === "object" ? j0 : {};
+      // gate 59.1 r1 (aluno-zero): 404 sem a frase da imagem = o site ainda não tem a rota do vetor (plugin novo, site velho)
+      if (res.status === 404) return text(/não encontrada/i.test(String(j.error ?? "")) ? "Imagem não encontrada nesta conta (apagada ou de outra conta). Confira o id na aba Imagens." : "O site do Iron Office ainda não tem o vetor no ar. Diga ao aluno que tente de novo mais tarde; não trace por conta própria.", true);
+      if (res.status === 422) return text(JSON.stringify({ ok: false, reason: typeof j.reason === "string" ? j.reason.slice(0, 40) : "infiel", error: String(j.error ?? "").slice(0, 240),
+        proximo: "Diga ao aluno a frase do `error`, com todas as letras, e pare. Nada de vetor por outro caminho: não trace, não converta, não instale nada, não redesenhe." }));
+      if (!res.ok || j.ok !== true) return text(`Não deu pra fazer o vetor: ${String(j.error ?? `HTTP ${res.status}`).slice(0, 200)}`, true);
+      const url = typeof j.compare_url === "string" && j.compare_url.startsWith(`${BASE}/images?comparar=`) ? j.compare_url : `${BASE}/images?comparar=${imageId}`;
+      return text(JSON.stringify({ ok: true, image_id: imageId, fidelity: j.fidelity ?? null, compare_url: url,
+        proximo: "Mande o compare_url no `reply` (o aluno compara o original com o vetor) e pergunte por `ask` com `vector: <image_id>`. Só no 'Sim, ficou igual' chame image_get com kind svg, svg-preto e svg-branco. Nada vai pra marca/vetor antes do Sim." }));
+    } catch (e) {
+      if (e?.name === "AbortError") return text("O site demorou demais pra fazer o vetor; tente de novo em 1 minuto.", true);
+      return text(`Não deu pra fazer o vetor: ${String(e?.message ?? e).slice(0, 200)}`, true);
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
   // 0.29.0 (onda 59): o arquivo ORIGINAL da imagem escolhida, pelo site, com a chave (o porteiro não entra: é o plugin)
   if (name === "image_get") {
     const id = String(args.project_id ?? "").trim().toLowerCase();
@@ -1419,7 +1479,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const imageId = String(args.image_id ?? "").trim().toLowerCase();
     if (!UUID_RE.test(imageId)) return text("image_id: o id COMPLETO (UUID) da imagem, o de 'imagem escolhida: <id>'. Id curto ou link não vale.", true);
     const kind = args.kind === undefined || args.kind === null ? "original" : args.kind;
-    if (kind !== "original" && kind !== "alpha") return text("kind: original ou alpha.", true);
+    if (!["original", "alpha", "svg", "svg-preto", "svg-branco"].includes(kind)) return text("kind: original, alpha, svg, svg-preto ou svg-branco.", true);
+    const isSvg = kind.startsWith("svg");
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 45_000);
     try {
@@ -1430,22 +1491,27 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         const j0 = await res.json().catch(() => null);
         const j = j0 && typeof j0 === "object" ? j0 : {};
         if (res.status === 404) return text("Imagem não encontrada nesta conta (apagada ou de outra conta). Confira o id na aba Imagens.", true);
+        // 0.29.1: SVG sem a aprovação do aluno (o site guarda o marcador; o Iron não aprova por ele)
+        if (res.status === 409) return text(JSON.stringify({ ok: false, reason: "sem_aprovacao", error: "o aluno ainda não aprovou o vetor", proximo: "Mande o compare_url do image_vectorize e pergunte por `ask` com `vector`. Nunca trace por conta própria." }));
         if (res.status === 422) return text(JSON.stringify({ ok: false, reason: typeof j.reason === "string" ? j.reason.slice(0, 40) : "sem_recorte", error: String(j.error ?? "").slice(0, 240), proximo: "Fica o original (kind original). Diga ao aluno a frase do `error`, com todas as letras: o recorte sem fundo, aqui, mudaria o desenho; se ele precisar, um designer recorta a partir do original." }));
         return text(`Não deu pra trazer a imagem: ${String(j.error ?? `HTTP ${res.status}`).slice(0, 200)}`, true);
       }
       if ((res.headers.get("x-image-project") ?? "").toLowerCase() !== id) return text("Essa imagem é de outra loja desta conta: confira a loja do pedido (linha [loja: …]).", true);
       const buf = Buffer.from(await res.arrayBuffer());
       if (!buf.length || buf.length > 15 * 1024 * 1024) return text("O site devolveu um arquivo vazio ou grande demais.", true);
+      if (isSvg && !/svg/i.test(res.headers.get("content-type") ?? "")) return text("O site não devolveu um SVG; tente de novo.", true);
       const png = /png/i.test(res.headers.get("content-type") ?? "");
       // a pasta da loja: o nome vem da lista de lojas da conta (só vira slug a-z0-9-)
       let store = null;
       try { const l = await api("/api/shopify/graphql?stores=1"); store = Array.isArray(l?.stores) ? l.stores.find((x) => x?.project_id === id) ?? null : null; } catch {}
-      const { dir, file } = originalPath({ store: store ?? { slug: id.slice(0, 8) }, imageId, kind: kind === "alpha" ? "alpha" : png ? "original-png" : "original" });
+      const { dir, file } = originalPath({ store: store ?? { slug: id.slice(0, 8) }, imageId, kind: isSvg || kind === "alpha" ? kind : png ? "original-png" : "original" });
       mkdirSync(dir, { recursive: true });
       writeFileSync(file, buf);
       const sha256 = createHash("sha256").update(buf).digest("hex");
       return text(JSON.stringify({ ok: true, path: file, kind, bytes: buf.length, sha256, project_id: id,
-        nota: kind === "alpha"
+        nota: isSvg
+          ? "Vetor que o ALUNO aprovou olhando a comparação (o site traçou e mediu). É o logo oficial em vetor. Não redesenhe, não mude cor, fonte nem proporção."
+          : kind === "alpha"
           ? "PNG sem fundo do MESMO desenho (recorte do site, pixel a pixel). É o logo oficial em imagem. Não redesenhe."
           : "Este é o arquivo ORIGINAL que o aluno aprovou. Leia pelo path pra ver. Não redesenhe, não refaça a partir de print, não 'limpe' letra." }));
     } catch (e) {

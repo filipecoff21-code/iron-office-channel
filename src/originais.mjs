@@ -54,11 +54,14 @@ export function slugLoja(store) {
 }
 // pasta FIXA: <cofre>/Projetos/<loja>/marca/originais (sem cofre, ~/Iron Office/<loja>/marca/originais).
 // O nome do arquivo é <8 do id>.<ext>; id já validado como UUID e ext de lista fechada. Confere que ficou dentro da base.
+// 0.29.1 (onda 59.1): o vetor aprovado pelo aluno vai em marca/vetor (<8>.svg, <8>-preto.svg, <8>-branco.svg)
+const EXT = { alpha: "-sem-fundo.png", "original-png": ".png", original: ".jpg", svg: ".svg", "svg-preto": "-preto.svg", "svg-branco": "-branco.svg" };
 export function originalPath({ home = homedir(), cofre = cofreDir(home), store, imageId, kind }) {
   if (!UUID_RE.test(imageId)) throw new Error("image_id inválido");
-  const ext = kind === "alpha" ? "-sem-fundo.png" : kind === "original-png" ? ".png" : ".jpg";
+  if (!Object.prototype.hasOwnProperty.call(EXT, kind)) throw new Error("kind inválido");
+  const ext = EXT[kind];
   const base = cofre ? resolve(cofre, "Projetos") : resolve(home, "Iron Office");
-  const dir = resolve(base, slugLoja(store), "marca", "originais");
+  const dir = resolve(base, slugLoja(store), "marca", kind.startsWith("svg") ? "vetor" : "originais");
   const file = resolve(dir, imageId.slice(0, 8).toLowerCase() + ext);
   if (!file.startsWith(base + sep)) throw new Error("caminho fora da pasta da loja");
   return { dir, file };

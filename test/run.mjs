@@ -2733,7 +2733,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(300);
   const tools = s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? [];
   const ig = tools.find((t) => t.name === "image_get");
-  check("59 image_get existe, diz que é o original e proíbe redesenhar; image_vectorize não existe (X1 reprovou)", !!ig && /ARQUIVO ORIGINAL/.test(ig.description) && /não se redesenha/.test(ig.description) && !tools.some((t) => t.name === "image_vectorize"), ig?.description?.slice(0, 120));
+  check("59 image_get existe, diz que é o original e proíbe redesenhar (59.1: image_vectorize existe e é do site)", !!ig && /ARQUIVO ORIGINAL/.test(ig.description) && /não se redesenha/.test(ig.description) && tools.some((t) => t.name === "image_vectorize"), ig?.description?.slice(0, 120));
   const askImgs = tools.find((t) => t.name === "ask")?.inputSchema?.properties?.images?.description ?? "";
   check("59 ask: campo images descrito ('nunca link no reply')", /Nunca mande link de imagem no `reply`/.test(askImgs), askImgs);
 
@@ -2752,7 +2752,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 6, "image_get", { project_id: LOJA, image_id: IMG_OUTRA });
   call(s, 7, "image_get", { project_id: LOJA, image_id: IMG_404 });
   call(s, 8, "image_get", { project_id: LOJA, image_id: "abcdef01" });
-  call(s, 9, "image_get", { project_id: LOJA, image_id: IMG, kind: "svg" });
+  call(s, 9, "image_get", { project_id: LOJA, image_id: IMG, kind: "pdf" });
   call(s, 10, "image_get", { project_id: "../../x", image_id: IMG });
   await sleep(900);
   const r4 = js(s, 4);
@@ -2762,7 +2762,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("59 imagem de outra loja da conta: recusa e não grava nada", res(s, 6)?.isError === true && /outra loja/.test(txt(s, 6)) && !existsSync(join(cofre, "Projetos", "minha-loja", "marca", "originais", "abcdef03.jpg")), txt(s, 6));
   check("59 404 vira frase; id curto, kind fora da lista e loja inválida são recusados sem rede", res(s, 7)?.isError === true && /não encontrada/.test(txt(s, 7))
     && res(s, 8)?.isError === true && res(s, 9)?.isError === true && res(s, 10)?.isError === true
-    && !f.calls.some((c) => /abcdef01\/file|kind=svg/.test(c.path) && !c.path.includes(IMG)), `${txt(s, 8)} | ${txt(s, 9)} | ${txt(s, 10)}`);
+    && !f.calls.some((c) => /abcdef01\/file|kind=pdf/.test(c.path) && !c.path.includes(IMG)), `${txt(s, 8)} | ${txt(s, 9)} | ${txt(s, 10)}`);
 
   // nome da loja hostil no slug: nunca sai da pasta (mutante a do plano)
   slug = "../../../../etc/passwd";
@@ -2819,7 +2819,95 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções intocado (3899) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.29.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções intocado (3899) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.29.1", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  s.p.kill();
+  f.srv.close();
+}
+
+// ─── onda 59.1 (0.29.1): image_vectorize, image_get dos SVG (só depois da aprovação), ask com vector ─
+{
+  console.log("onda 59.1 (0.29.1)");
+  const { existsSync } = await import("node:fs");
+  const LOJA = "59595959-5959-4959-8959-595959595959";
+  const IMG = "abcdef01-2345-4678-9abc-def012345678", IMG_3D = "abcdef05-2345-4678-9abc-def012345678", IMG_NAO = "abcdef06-2345-4678-9abc-def012345678";
+  const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path fill="#543124" d="M0 0L4 0L4 4Z"/></svg>');
+  let aprovado = false;
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/chat/messages") return { json: { id: "q-591" } };
+    if (c.path === "/api/shopify/graphql?stores=1") return { json: { stores: [{ project_id: LOJA, name: "Minha Loja", slug: "minha-loja" }] } };
+    if (c.path === `/api/images/${IMG}/vector` && c.method === "POST") return { json: { ok: true, fidelity: { orig_in_svg: 1, svg_in_orig: 1, thickness_diff: 0.015, ok: true }, compare_url: `${f.url}/images?comparar=${IMG}` } };
+    if (c.path === "/api/images/abcdef07-2345-4678-9abc-def012345678/vector") return { status: 404, raw: Buffer.from("<html>404</html>"), headers: { "content-type": "text/html" } };
+    if (c.path === "/api/images/abcdef08-2345-4678-9abc-def012345678/vector") return { status: 404, json: { error: "Imagem não encontrada." } };
+    if (c.path === `/api/images/${IMG_3D}/vector`) return { status: 422, json: { ok: false, reason: "fora_da_classe", error: "Esta imagem não é um logo de uma cor só. O vetor dela precisa de um designer: leve a imagem original." } };
+    for (const k of ["svg", "svg-preto", "svg-branco"]) {
+      if (c.path === `/api/images/${IMG}/file?kind=${k}`) return aprovado ? { raw: SVG, headers: { "content-type": "image/svg+xml", "x-image-project": LOJA } } : { status: 409, json: { error: "O aluno ainda não aprovou o vetor", reason: "sem_aprovacao" } };
+    }
+    if (c.path === `/api/images/${IMG_NAO}/file?kind=svg`) return { raw: Buffer.from("<html>"), headers: { "content-type": "text/html", "x-image-project": LOJA } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const res = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => res(s, id)?.content?.[0]?.text ?? "";
+  const js = (s, id) => { try { return JSON.parse(txt(s, id)); } catch { return {}; } };
+  const home = casa();
+  const cofre = join(home, "Cofre");
+  mkdirSync(join(cofre, ".obsidian"), { recursive: true });
+  mkdirSync(join(home, ".iron"), { recursive: true });
+  writeFileSync(join(home, ".iron", "config.yaml"), "vault_path: ~/Cofre\n");
+  const s = startServer(home, f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  s.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+  call(s, 3, "image_vectorize", { project_id: LOJA, image_id: IMG });
+  call(s, 4, "image_vectorize", { project_id: LOJA, image_id: IMG_3D });
+  call(s, 5, "image_vectorize", { project_id: LOJA, image_id: "abcdef01" });
+  await sleep(900);
+  const tools = s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? [];
+  const tv = tools.find((t) => t.name === "image_vectorize"), tg = tools.find((t) => t.name === "image_get");
+  const REGRA = /NUNCA trace, converta ou redesenhe/;
+  check("59.1 image_vectorize e image_get trazem a regra sem condição (não traçar, não instalar, não converter)", !!tv && REGRA.test(tv.description) && REGRA.test(tg?.description ?? "") && /sem instalar/.test(tv.description) && JSON.stringify(tg?.inputSchema?.properties?.kind?.enum) === '["original","alpha","svg","svg-preto","svg-branco"]', tv?.description?.slice(0, 200));
+  const v3 = js(s, 3);
+  check("59.1 image_vectorize: POST na rota com a chave; devolve fidelity, compare_url e o próximo passo (ask com vector)", v3.ok === true && v3.compare_url === `${f.url}/images?comparar=${IMG}` && /`vector/.test(v3.proximo ?? "") && f.calls.some((c) => c.path === `/api/images/${IMG}/vector` && c.method === "POST" && c.key === KEY), txt(s, 3));
+  const v4 = js(s, 4);
+  check("59.1 recusa fora_da_classe: frase do site e 'pare', sem outro caminho", v4.ok === false && v4.reason === "fora_da_classe" && /designer/.test(v4.error) && /não trace/.test(v4.proximo ?? ""), txt(s, 4));
+  call(s, 20, "image_vectorize", { project_id: LOJA, image_id: "abcdef07-2345-4678-9abc-def012345678" });
+  call(s, 21, "image_vectorize", { project_id: LOJA, image_id: "abcdef08-2345-4678-9abc-def012345678" });
+  await sleep(700);
+  check("59.1 r1 404 sem a frase da imagem = site sem a rota do vetor (e 'não trace'); 404 com a frase = imagem não encontrada", /ainda não tem o vetor no ar/.test(txt(s, 20)) && /não trace/.test(txt(s, 20)) && /não encontrada nesta conta/.test(txt(s, 21)), `${txt(s, 20)} | ${txt(s, 21)}`);
+  const mk = JSON.parse(readFileSync(join(ROOT, ".claude-plugin", "marketplace.json"), "utf8"));
+  check("59.1 r1 marketplace.json na mesma versão do package.json", mk.version === VERSAO_ATUAL && mk.plugins?.[0]?.version === VERSAO_ATUAL, `${mk.version} ${mk.plugins?.[0]?.version}`);
+  check("59.1 id curto recusado sem rede", res(s, 5)?.isError === true && !f.calls.some((c) => c.path.includes("abcdef01/vector") && !c.path.includes(IMG)), txt(s, 5));
+
+  // E.2 no plugin: antes do Sim, image_get dos SVG volta 409 e NADA é gravado em marca/vetor
+  call(s, 6, "image_get", { project_id: LOJA, image_id: IMG, kind: "svg" });
+  await sleep(700);
+  const vetorDir = join(cofre, "Projetos", "minha-loja", "marca", "vetor");
+  check("59.1 SVG sem a aprovação do aluno: sem_aprovacao, manda a comparação, nada em marca/vetor", js(s, 6).reason === "sem_aprovacao" && /comparação|compare_url/.test(js(s, 6).proximo ?? "") && !existsSync(vetorDir), txt(s, 6));
+  aprovado = true;
+  call(s, 7, "image_get", { project_id: LOJA, image_id: IMG, kind: "svg" });
+  call(s, 8, "image_get", { project_id: LOJA, image_id: IMG, kind: "svg-preto" });
+  call(s, 9, "image_get", { project_id: LOJA, image_id: IMG, kind: "svg-branco" });
+  call(s, 10, "image_get", { project_id: LOJA, image_id: IMG_NAO, kind: "svg" });
+  await sleep(1200);
+  const paths = [7, 8, 9].map((i) => js(s, i).path);
+  check("59.1 G4(f) depois do Sim: os 3 SVG em <cofre>/Projetos/<loja>/marca/vetor, com nome fixo", JSON.stringify(paths) === JSON.stringify([join(vetorDir, "abcdef01.svg"), join(vetorDir, "abcdef01-preto.svg"), join(vetorDir, "abcdef01-branco.svg")]) && paths.every((p) => p && readFileSync(p).equals(SVG)), JSON.stringify(paths));
+  check("59.1 o site devolveu algo que não é SVG: recusa, nada gravado", res(s, 10)?.isError === true && !existsSync(join(vetorDir, "abcdef06.svg")), txt(s, 10));
+
+  // ask com vector: o plugin manda só o id; texto e botões são do site
+  const antes = f.calls.filter((c) => c.path === "/api/chat/messages").length;
+  call(s, 11, "ask", { chat_id: "c1", question: "Aprova?", vector: IMG.toUpperCase(), project_id: LOJA });
+  call(s, 12, "ask", { chat_id: "c1", question: "Aprova?", vector: IMG, options: ["Sim"] });
+  call(s, 13, "ask", { chat_id: "c1", question: "Aprova?", vector: "abcdef01" });
+  await sleep(900);
+  const qs = f.calls.filter((c) => c.path === "/api/chat/messages").slice(antes);
+  check("59.1 ask com vector: meta.question { text, vector } sem opções do Iron; avisa o que fazer no Sim e no Não", qs.length === 1 && qs[0].body.meta.question.vector === IMG && qs[0].body.meta.question.options === undefined && /svg-preto/.test(txt(s, 11)) && /designer/.test(txt(s, 11)), JSON.stringify(qs[0]?.body));
+  check("59.1 ask: vector com options, ou id curto, recusados sem rede", res(s, 12)?.isError === true && res(s, 13)?.isError === true, `${txt(s, 12)} | ${txt(s, 13)}`);
+  const { originalPath } = await import(join(ROOT, "src", "originais.mjs"));
+  let lanca = false;
+  try { originalPath({ home, cofre, store: { slug: "x" }, imageId: IMG, kind: "../svg" }); } catch { lanca = true; }
+  check("59.1 originalPath: kind fora da lista lança", lanca);
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
+  check("59.1 bloco de instruções intocado (3899), sem image_vectorize nele, versão 0.29.1", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_vectorize") && init?.serverInfo?.version === "0.29.1", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
