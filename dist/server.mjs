@@ -17037,13 +17037,28 @@ function slugLoja(store) {
   const base = String(store?.slug || store?.name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/, "");
   return base || "loja";
 }
+var FICHA_FOLDER_RE = /^Projetos\/([a-z0-9][a-z0-9-]{0,59})\//;
+function pastaLoja(store) {
+  const m = typeof store?.ficha_path === "string" ? FICHA_FOLDER_RE.exec(store.ficha_path) : null;
+  return m ? m[1] : slugLoja(store);
+}
+var baseDir = (home, cofre) => cofre ? resolve(cofre, "Projetos") : resolve(home, "Iron Office");
+function pastaAntiga({ home = homedir(), cofre = cofreDir(home), store, outras }) {
+  if (!Array.isArray(outras)) return null;
+  const velhaNome = slugLoja(store);
+  if (outras.some((o) => o && (pastaLoja(o) === velhaNome || slugLoja(o) === velhaNome))) return null;
+  const base = baseDir(home, cofre);
+  const velha = resolve(base, velhaNome, "marca");
+  const nova = resolve(base, pastaLoja(store), "marca");
+  return velha !== nova && isDir(velha) ? velha : null;
+}
 var EXT = { alpha: "-sem-fundo.png", "original-png": ".png", original: ".jpg", svg: ".svg", "svg-preto": "-preto.svg", "svg-branco": "-branco.svg" };
 function originalPath({ home = homedir(), cofre = cofreDir(home), store, imageId, kind }) {
   if (!UUID_RE.test(imageId)) throw new Error("image_id inv\xE1lido");
   if (!Object.prototype.hasOwnProperty.call(EXT, kind)) throw new Error("kind inv\xE1lido");
   const ext = EXT[kind];
-  const base = cofre ? resolve(cofre, "Projetos") : resolve(home, "Iron Office");
-  const dir = resolve(base, slugLoja(store), "marca", kind.startsWith("svg") ? "vetor" : "originais");
+  const base = baseDir(home, cofre);
+  const dir = resolve(base, pastaLoja(store), "marca", kind.startsWith("svg") ? "vetor" : "originais");
   const file = resolve(dir, imageId.slice(0, 8).toLowerCase() + ext);
   if (!file.startsWith(base + sep)) throw new Error("caminho fora da pasta da loja");
   return { dir, file };
@@ -17243,7 +17258,7 @@ function porteiroAskCheck(text2, options, { home = homedir2() } = {}) {
 }
 
 // src/server.mjs
-var VERSION = "0.29.1";
+var VERSION = "0.30.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join4(homedir3(), ".claude", "iron-office-api-key");
@@ -17375,7 +17390,8 @@ function storePrefix(store) {
   const id = UUID_RE2.test(store.id) ? ` \xB7 id: ${store.id}` : "";
   const done = Number.isInteger(store.trail_done) && store.trail_done >= 0 ? ` \xB7 trilha: ${store.trail_done} feita${store.trail_done === 1 ? "" : "s"}` : "";
   const caminho = store.trail_path === "sem_loja" ? " \xB7 caminho: criar a loja" : "";
-  return `[loja: ${name} \xB7 ${kind}${id} \xB7 ficha: ${path}${done}${caminho}]
+  const pasta = ` \xB7 pasta: Projetos/${pastaLoja(store)}`;
+  return `[loja: ${name} \xB7 ${kind}${id} \xB7 ficha: ${path}${done}${caminho}${pasta}]
 `;
 }
 var UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17896,7 +17912,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "image_get",
-    description: "Traz pro computador o ARQUIVO ORIGINAL de uma imagem da aba Imagens (onda 59), pelo site, com a chave do aluno: nada de curl, print de tela ou navegador. Use quando chegar 'imagem escolhida: <id>' (clique na miniatura ou no bot\xE3o 'Escolhi esta') ou quando precisar ver/usar uma imagem que o aluno aprovou. Grava numa pasta FIXA (`<cofre>/Projetos/<loja>/marca/originais/<8 primeiros do id>.<ext>`; sem cofre, `~/Iron Office/<loja>/marca/originais/`) e devolve { ok, path, kind, bytes, sha256, project_id }. Leia o arquivo pelo `path` pra ver a imagem. ESTE \xC9 O ARQUIVO ORIGINAL: imagem aprovada n\xE3o se redesenha, n\xE3o se refaz a partir de print e n\xE3o se 'limpa'. kind 'alpha' = o mesmo desenho em PNG sem o fundo (o site recorta fundo liso; fundo com degrad\xEA/foto volta reason 'fundo_nao_liso' e a\xED fica o original). kind 'svg', 'svg-preto', 'svg-branco' (0.29.1) = o vetor que o ALUNO aprovou na compara\xE7\xE3o, gravado em `marca/vetor/`; sem a aprova\xE7\xE3o dele o site responde que ainda n\xE3o aprovou: mande a compara\xE7\xE3o (image_vectorize) e pergunte. NUNCA trace, converta ou redesenhe uma imagem por conta pr\xF3pria: sem script de tra\xE7ado, sem tra\xE7ador que j\xE1 esteja na m\xE1quina, sem instalar um, sem converter por c\xF3digo, sem redesenhar. Vetor, 'sem fundo', 'em preto' e 'em branco' de imagem gerada s\xF3 saem por image_vectorize e image_get. Recusa (infiel, fora_da_classe, fundo_nao_liso): diga a frase do `error` e pare. A imagem tem que ser da loja do project_id. S\xF3 ids completos (UUID).",
+    description: "Traz pro computador o ARQUIVO ORIGINAL de uma imagem da aba Imagens (onda 59), pelo site, com a chave do aluno: nada de curl, print de tela ou navegador. Use quando chegar 'imagem escolhida: <id>' (clique na miniatura ou no bot\xE3o 'Escolhi esta') ou quando precisar ver/usar uma imagem que o aluno aprovou. Grava numa pasta FIXA (`<cofre>/Projetos/<pasta>/marca/originais/<8 primeiros do id>.<ext>`, onde <pasta> \xE9 a do `pasta:` da linha [loja: \u2026], a MESMA da ficha; sem cofre, `~/Iron Office/<pasta>/marca/originais/`) e devolve { ok, path, kind, bytes, sha256, project_id }. 0.30.0: se a loja tinha a marca em outra pasta, volta tamb\xE9m `pasta_antiga` e `pasta_nova`: ofere\xE7a juntar por `ask` (Sim/N\xE3o); no Sim mova arquivo por arquivo sem sobrescrever e apague a antiga s\xF3 se ficou vazia. Nunca mova sem o Sim. Leia o arquivo pelo `path` pra ver a imagem. ESTE \xC9 O ARQUIVO ORIGINAL: imagem aprovada n\xE3o se redesenha, n\xE3o se refaz a partir de print e n\xE3o se 'limpa'. kind 'alpha' = o mesmo desenho em PNG sem o fundo (o site recorta fundo liso; fundo com degrad\xEA/foto volta reason 'fundo_nao_liso' e a\xED fica o original). kind 'svg', 'svg-preto', 'svg-branco' (0.29.1) = o vetor que o ALUNO aprovou na compara\xE7\xE3o, gravado em `marca/vetor/`; sem a aprova\xE7\xE3o dele o site responde que ainda n\xE3o aprovou: mande a compara\xE7\xE3o (image_vectorize) e pergunte. NUNCA trace, converta ou redesenhe uma imagem por conta pr\xF3pria: sem script de tra\xE7ado, sem tra\xE7ador que j\xE1 esteja na m\xE1quina, sem instalar um, sem converter por c\xF3digo, sem redesenhar. Vetor, 'sem fundo', 'em preto' e 'em branco' de imagem gerada s\xF3 saem por image_vectorize e image_get. Recusa (infiel, fora_da_classe, fundo_nao_liso): diga a frase do `error` e pare. A imagem tem que ser da loja do project_id. S\xF3 ids completos (UUID).",
     inputSchema: {
       type: "object",
       properties: {
@@ -18562,16 +18578,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (!buf.length || buf.length > 15 * 1024 * 1024) return text("O site devolveu um arquivo vazio ou grande demais.", true);
       if (isSvg && !/svg/i.test(res.headers.get("content-type") ?? "")) return text("O site n\xE3o devolveu um SVG; tente de novo.", true);
       const png = /png/i.test(res.headers.get("content-type") ?? "");
-      let store = null;
+      let store = null, lista = null;
       try {
         const l = await api("/api/shopify/graphql?stores=1");
-        store = Array.isArray(l?.stores) ? l.stores.find((x) => x?.project_id === id) ?? null : null;
+        lista = Array.isArray(l?.stores) ? l.stores : null;
+        store = lista ? lista.find((x) => x?.project_id === id) ?? null : null;
       } catch {
       }
-      const { dir, file } = originalPath({ store: store ?? { slug: id.slice(0, 8) }, imageId, kind: isSvg || kind === "alpha" ? kind : png ? "original-png" : "original" });
+      if (!store) return text("N\xE3o consegui ler a lista de lojas pra saber a pasta desta loja; nada foi gravado. Tente de novo em 1 minuto.", true);
+      const { dir, file } = originalPath({ store, imageId, kind: isSvg || kind === "alpha" ? kind : png ? "original-png" : "original" });
       mkdirSync(dir, { recursive: true });
       writeFileSync2(file, buf);
       const sha256 = createHash2("sha256").update(buf).digest("hex");
+      let antiga = null;
+      try {
+        antiga = pastaAntiga({ store, outras: lista.filter((x) => x?.project_id !== id) });
+      } catch {
+      }
       return text(JSON.stringify({
         ok: true,
         path: file,
@@ -18579,6 +18602,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         bytes: buf.length,
         sha256,
         project_id: id,
+        ...antiga ? { pasta_antiga: antiga, pasta_nova: dirname2(dir), proximo: "Achei arquivos da marca desta loja em outra pasta. Ofere\xE7a juntar por `ask` (Sim/N\xE3o), uma pergunta s\xF3; no Sim mova arquivo por arquivo SEM sobrescrever (mv -n; Windows: Move-Item sem -Force), apague a pasta antiga s\xF3 se ficou vazia e diga o que ficou onde. No N\xE3o, deixe como est\xE1." } : {},
         nota: isSvg ? "Vetor que o ALUNO aprovou olhando a compara\xE7\xE3o (o site tra\xE7ou e mediu). \xC9 o logo oficial em vetor. N\xE3o redesenhe, n\xE3o mude cor, fonte nem propor\xE7\xE3o." : kind === "alpha" ? "PNG sem fundo do MESMO desenho (recorte do site, pixel a pixel). \xC9 o logo oficial em imagem. N\xE3o redesenhe." : "Este \xE9 o arquivo ORIGINAL que o aluno aprovou. Leia pelo path pra ver. N\xE3o redesenhe, n\xE3o refa\xE7a a partir de print, n\xE3o 'limpe' letra."
       }));
     } catch (e) {

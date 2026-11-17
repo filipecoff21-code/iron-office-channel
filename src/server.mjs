@@ -12,12 +12,12 @@ import { homedir } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { estadoPrimeira } from "./primeira.mjs";
-import { originalPath } from "./originais.mjs";
+import { originalPath, pastaAntiga, pastaLoja } from "./originais.mjs";
 import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.29.1";
+const VERSION = "0.30.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -196,7 +196,9 @@ function storePrefix(store) {
   // 0.8.0 (onda 27a): só o contador da trilha; o catálogo o modelo lê pelo trail_status
   const done = Number.isInteger(store.trail_done) && store.trail_done >= 0 ? ` · trilha: ${store.trail_done} feita${store.trail_done === 1 ? "" : "s"}` : "";
   const caminho = store.trail_path === "sem_loja" ? " · caminho: criar a loja" : "";
-  return `[loja: ${name} · ${kind}${id} · ficha: ${path}${done}${caminho}]\n`;
+  // 0.30.0 (onda 60): a pasta da loja no cofre (a da ficha; senão a do slug). As skills gravam ficha e marca AQUI.
+  const pasta = ` · pasta: Projetos/${pastaLoja(store)}`;
+  return `[loja: ${name} · ${kind}${id} · ficha: ${path}${done}${caminho}${pasta}]\n`;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -793,7 +795,7 @@ const TOOLS = DEGRADED
       {
         name: "image_get",
         description:
-          "Traz pro computador o ARQUIVO ORIGINAL de uma imagem da aba Imagens (onda 59), pelo site, com a chave do aluno: nada de curl, print de tela ou navegador. Use quando chegar 'imagem escolhida: <id>' (clique na miniatura ou no botão 'Escolhi esta') ou quando precisar ver/usar uma imagem que o aluno aprovou. Grava numa pasta FIXA (`<cofre>/Projetos/<loja>/marca/originais/<8 primeiros do id>.<ext>`; sem cofre, `~/Iron Office/<loja>/marca/originais/`) e devolve { ok, path, kind, bytes, sha256, project_id }. Leia o arquivo pelo `path` pra ver a imagem. ESTE É O ARQUIVO ORIGINAL: imagem aprovada não se redesenha, não se refaz a partir de print e não se 'limpa'. kind 'alpha' = o mesmo desenho em PNG sem o fundo (o site recorta fundo liso; fundo com degradê/foto volta reason 'fundo_nao_liso' e aí fica o original). kind 'svg', 'svg-preto', 'svg-branco' (0.29.1) = o vetor que o ALUNO aprovou na comparação, gravado em `marca/vetor/`; sem a aprovação dele o site responde que ainda não aprovou: mande a comparação (image_vectorize) e pergunte. NUNCA trace, converta ou redesenhe uma imagem por conta própria: sem script de traçado, sem traçador que já esteja na máquina, sem instalar um, sem converter por código, sem redesenhar. Vetor, 'sem fundo', 'em preto' e 'em branco' de imagem gerada só saem por image_vectorize e image_get. Recusa (infiel, fora_da_classe, fundo_nao_liso): diga a frase do `error` e pare. A imagem tem que ser da loja do project_id. Só ids completos (UUID).",
+          "Traz pro computador o ARQUIVO ORIGINAL de uma imagem da aba Imagens (onda 59), pelo site, com a chave do aluno: nada de curl, print de tela ou navegador. Use quando chegar 'imagem escolhida: <id>' (clique na miniatura ou no botão 'Escolhi esta') ou quando precisar ver/usar uma imagem que o aluno aprovou. Grava numa pasta FIXA (`<cofre>/Projetos/<pasta>/marca/originais/<8 primeiros do id>.<ext>`, onde <pasta> é a do `pasta:` da linha [loja: …], a MESMA da ficha; sem cofre, `~/Iron Office/<pasta>/marca/originais/`) e devolve { ok, path, kind, bytes, sha256, project_id }. 0.30.0: se a loja tinha a marca em outra pasta, volta também `pasta_antiga` e `pasta_nova`: ofereça juntar por `ask` (Sim/Não); no Sim mova arquivo por arquivo sem sobrescrever e apague a antiga só se ficou vazia. Nunca mova sem o Sim. Leia o arquivo pelo `path` pra ver a imagem. ESTE É O ARQUIVO ORIGINAL: imagem aprovada não se redesenha, não se refaz a partir de print e não se 'limpa'. kind 'alpha' = o mesmo desenho em PNG sem o fundo (o site recorta fundo liso; fundo com degradê/foto volta reason 'fundo_nao_liso' e aí fica o original). kind 'svg', 'svg-preto', 'svg-branco' (0.29.1) = o vetor que o ALUNO aprovou na comparação, gravado em `marca/vetor/`; sem a aprovação dele o site responde que ainda não aprovou: mande a comparação (image_vectorize) e pergunte. NUNCA trace, converta ou redesenhe uma imagem por conta própria: sem script de traçado, sem traçador que já esteja na máquina, sem instalar um, sem converter por código, sem redesenhar. Vetor, 'sem fundo', 'em preto' e 'em branco' de imagem gerada só saem por image_vectorize e image_get. Recusa (infiel, fora_da_classe, fundo_nao_liso): diga a frase do `error` e pare. A imagem tem que ser da loja do project_id. Só ids completos (UUID).",
         inputSchema: {
           type: "object",
           properties: {
@@ -1502,13 +1504,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (isSvg && !/svg/i.test(res.headers.get("content-type") ?? "")) return text("O site não devolveu um SVG; tente de novo.", true);
       const png = /png/i.test(res.headers.get("content-type") ?? "");
       // a pasta da loja: o nome vem da lista de lojas da conta (só vira slug a-z0-9-)
-      let store = null;
-      try { const l = await api("/api/shopify/graphql?stores=1"); store = Array.isArray(l?.stores) ? l.stores.find((x) => x?.project_id === id) ?? null : null; } catch {}
-      const { dir, file } = originalPath({ store: store ?? { slug: id.slice(0, 8) }, imageId, kind: isSvg || kind === "alpha" ? kind : png ? "original-png" : "original" });
+      let store = null, lista = null;
+      try { const l = await api("/api/shopify/graphql?stores=1"); lista = Array.isArray(l?.stores) ? l.stores : null; store = lista ? lista.find((x) => x?.project_id === id) ?? null : null; } catch {}
+      // 0.30.0 (gate 60 r1 I3): sem a loja na lista não há pasta certa; antes gravava numa pasta provisória (<id8>), uma
+      // terceira pasta da mesma loja. Agora não grava e diz pra tentar de novo.
+      if (!store) return text("Não consegui ler a lista de lojas pra saber a pasta desta loja; nada foi gravado. Tente de novo em 1 minuto.", true);
+      const { dir, file } = originalPath({ store, imageId, kind: isSvg || kind === "alpha" ? kind : png ? "original-png" : "original" });
       mkdirSync(dir, { recursive: true });
       writeFileSync(file, buf);
       const sha256 = createHash("sha256").update(buf).digest("hex");
+      // 0.30.0 (onda 60): loja dividida antes desta versão (marca na pasta do slug, ficha em outra) = avisa, não move
+      let antiga = null;
+      try { antiga = pastaAntiga({ store, outras: lista.filter((x) => x?.project_id !== id) }); } catch {}
       return text(JSON.stringify({ ok: true, path: file, kind, bytes: buf.length, sha256, project_id: id,
+        ...(antiga ? { pasta_antiga: antiga, pasta_nova: dirname(dir), proximo: "Achei arquivos da marca desta loja em outra pasta. Ofereça juntar por `ask` (Sim/Não), uma pergunta só; no Sim mova arquivo por arquivo SEM sobrescrever (mv -n; Windows: Move-Item sem -Force), apague a pasta antiga só se ficou vazia e diga o que ficou onde. No Não, deixe como está." } : {}),
         nota: isSvg
           ? "Vetor que o ALUNO aprovou olhando a comparação (o site traçou e mediu). É o logo oficial em vetor. Não redesenhe, não mude cor, fonte nem proporção."
           : kind === "alpha"

@@ -942,7 +942,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.handshake();
   await sleep(2500);
   const n1 = notifs(s.out)[0]?.msg.params.content ?? "";
-  check("prefixo [loja: nome · tipo · id · ficha: ainda sem ficha] na 1ª linha (0.7.1: com o id)", n1.startsWith("[loja: Bravo ") && n1.includes(` · Loja Shopify · id: ${LOJA} · ficha: ainda sem ficha]\nem qual loja estamos?`), JSON.stringify(n1));
+  check("prefixo [loja: nome · tipo · id · ficha: ainda sem ficha · pasta: …] na 1ª linha (0.7.1: com o id; 0.30.0: a pasta do slug sem ficha)", n1.startsWith("[loja: Bravo ") && n1.includes(` · Loja Shopify · id: ${LOJA} · ficha: ainda sem ficha · pasta: Projetos/bravo]\nem qual loja estamos?`), JSON.stringify(n1));
   check("nome da loja passa pelo filtro de segredos", !n1.includes("iok_" + "b".repeat(48)), JSON.stringify(n1));
   call(s, 2, "reply", { chat_id: "c1", text: "Estamos na Bravo." });
   call(s, 3, "deliver", { title: "T", agent: "iron-ceo", content: "C" });
@@ -1066,7 +1066,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.handshake();
   await sleep(4500);
   const ns = notifs(s.out).map((n) => n.msg.params.content);
-  check("prefixo: ficha_path fora da regra (~) vira 'ainda sem ficha'; o relativo passa", /ficha: ainda sem ficha\]\noi$/.test(ns[0] ?? "") && /ficha: Projetos\/loja-exemplo\/PROJETO\.md\]\noi de novo$/.test(ns[1] ?? ""), JSON.stringify(ns));
+  check("prefixo: ficha_path fora da regra (~) vira 'ainda sem ficha'; o relativo passa", /ficha: ainda sem ficha · pasta: Projetos\/[a-z0-9-]+\]\noi$/.test(ns[0] ?? "") && /ficha: Projetos\/loja-exemplo\/PROJETO\.md · pasta: Projetos\/loja-exemplo\]\noi de novo$/.test(ns[1] ?? ""), JSON.stringify(ns));
   for (const [i, bad] of [["..", "Projetos/../../etc/passwd"], ["abs", "/Users/x/cofre/PROJETO.md"], ["drive", "C:/cofre/PROJETO.md"], ["til", "~/cofre/PROJETO.md"], ["vazio", ""], ["backslash ..", "Projetos\\..\\x.md"]].entries()) {
     call(s, 10 + i, "store_update", { project_id: LOJA, ficha_path: bad[1], summary: "x" });
   }
@@ -1316,9 +1316,9 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.handshake();
   await sleep(6500);
   const ns = notifs(s.out).map((n) => n.msg.params.content);
-  check("prefixo com 'trilha: 4 feitas'", /\[loja: Loja Exemplo · Loja Shopify · id: [^\]]+ · ficha: Projetos\/loja-exemplo\/PROJETO\.md · trilha: 4 feitas\]\ntrilha: idioma$/.test(ns[0] ?? ""), JSON.stringify(ns[0]));
-  check("prefixo sem_loja: 'trilha: 1 feita · caminho: criar a loja'", /· trilha: 1 feita · caminho: criar a loja\]\noi$/.test(ns[1] ?? ""), JSON.stringify(ns[1]));
-  check("prefixo sem trail_done (site antigo): sem 'trilha'", /ficha: ainda sem ficha\]\ne ai$/.test(ns[2] ?? ""), JSON.stringify(ns[2]));
+  check("prefixo com 'trilha: 4 feitas'", /\[loja: Loja Exemplo · Loja Shopify · id: [^\]]+ · ficha: Projetos\/loja-exemplo\/PROJETO\.md · trilha: 4 feitas · pasta: Projetos\/loja-exemplo\]\ntrilha: idioma$/.test(ns[0] ?? ""), JSON.stringify(ns[0]));
+  check("prefixo sem_loja: 'trilha: 1 feita · caminho: criar a loja'", /· trilha: 1 feita · caminho: criar a loja · pasta: Projetos\/[a-z0-9-]+\]\noi$/.test(ns[1] ?? ""), JSON.stringify(ns[1]));
+  check("prefixo sem trail_done (site antigo): sem 'trilha'", /ficha: ainda sem ficha · pasta: Projetos\/[a-z0-9-]+\]\ne ai$/.test(ns[2] ?? ""), JSON.stringify(ns[2]));
 
   // ask: tamanhos e recusas
   call(s, 10, "ask", { chat_id: "c1", question: "Como o cliente paga?", options: ["Na entrega", { id: "cartao", label: "Cartão na loja" }, { id: "cartao", label: "Os dois" }], skip: true, project_id: LOJA });
@@ -2564,7 +2564,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const ins = s.out.find((o) => o.msg.id === 1)?.msg.result?.instructions ?? "";
   check("31a: o bloco cita espiar e spy_run e cabe em 3900", /`espiar`/.test(ins) && /`spy_run`/.test(ins) && ins.length <= 3900, String(ins.length));
   s.p.kill();
-  f.close?.();
+  f.srv.close();
 }
 
 // ─── onda 57 (0.27.0): links de prova no cartão, ad_library_url no Spy, ask com link shopify ───
@@ -2644,7 +2644,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const SK = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "skills", "office-fluxos", "SKILL.md"), "utf8");
   check("57 office-fluxos: seção de criar loja com link 'shopify', 'Já criei a loja' · 'Agora não', cliente sem botão, ≤ 8000", SK.includes("## Criar a loja na Shopify") && SK.includes('link: "shopify"') && SK.includes("Já criei a loja") && SK.includes("Agora não") && SK.includes("kind: cliente") && SK.length <= 8000, String(SK.length));
   s.p.kill();
-  f.close?.();
+  f.srv.close();
 }
 
 // ─── onda 58 (0.28.0): operation_status lê a operação COD pelo site ───
@@ -2819,7 +2819,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções intocado (3899) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.29.1", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções intocado (3899) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.30.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
@@ -2907,7 +2907,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   try { originalPath({ home, cofre, store: { slug: "x" }, imageId: IMG, kind: "../svg" }); } catch { lanca = true; }
   check("59.1 originalPath: kind fora da lista lança", lanca);
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59.1 bloco de instruções intocado (3899), sem image_vectorize nele, versão 0.29.1", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_vectorize") && init?.serverInfo?.version === "0.29.1", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59.1 bloco de instruções intocado (3899), sem image_vectorize nele, versão atual", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_vectorize") && init?.serverInfo?.version === VERSAO_ATUAL, `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
@@ -2956,6 +2956,69 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   ];
   check("59 r1 porteiro: curinga num caminho de .iron conta como mexer no porteiro (registro e liberados)", forjas.every((f) => /\[porteiro\] Esse comando mexe no porteiro/.test(decide59({ ...f, cwd: homeH }, { home: homeH })?.reason ?? "")), forjas.map((f) => decide59({ ...f, cwd: homeH }, { home: homeH })?.reason?.slice(0, 40)).join(" | "));
   check("59 porteiro: o gancho registra o barrado com hash e nome cortado", !!b?.hash && b?.curto?.endsWith("…") && Array.from(b.curto).length === 120, JSON.stringify(reg).slice(0, 300));
+}
+
+// ── 0.30.0 (onda 60): uma pasta por loja (ficha e marca juntas) ─────────────────────────────────────────────
+{
+  const { existsSync } = await import("node:fs");
+  const { pastaLoja, pastaAntiga, originalPath } = await import(join(ROOT, "src", "originais.mjs"));
+  // os MESMOS casos do storeFolder do site (lib/stores.test.ts), gêmeas
+  check("60 pastaLoja: a ficha em Projetos/<pasta>/… vence o slug", pastaLoja({ slug: "abc123-x", name: "LOJA X", ficha_path: "Projetos/loja-x/PROJETO.md" }) === "loja-x" && pastaLoja({ slug: "abc123-4c", ficha_path: "Projetos/loja-y/PROJETO.md" }) === "loja-y");
+  const tortas = ["Projetos/../segredo/PROJETO.md", "/Users/x/Projetos/a/PROJETO.md", "Clientes/a/PROJETO.md", "Projetos/Loja Z/PROJETO.md", "Projetos/a", "", null, undefined];
+  check("60 pastaLoja: ficha fora do formato (../, absoluta, outra raiz, maiúscula, vazia) cai no slug", tortas.every((ficha_path) => pastaLoja({ slug: "minha-loja", name: "Minha Loja", ficha_path }) === "minha-loja"), tortas.map((ficha_path) => pastaLoja({ slug: "minha-loja", ficha_path })).join(","));
+  check("60 pastaLoja: sem slug cai no nome; sem nada, 'loja'; nunca barra nem ponto", pastaLoja({ slug: null, name: "Café da Ana" }) === "cafe-da-ana" && pastaLoja({ name: "../../etc" }) === "etc" && pastaLoja({ name: "" }) === "loja"
+    && [{ name: "a/b/../c" }, { slug: "../x" }, { ficha_path: "Projetos/x/../../y/PROJETO.md" }].every((x) => /^[a-z0-9][a-z0-9-]*$/.test(pastaLoja(x))));
+  const home = casa();
+  const cofre = join(home, "Cofre 60");
+  mkdirSync(cofre, { recursive: true });
+  const IMG = "60606060-aaaa-4bbb-8ccc-dddddddddddd";
+  const store = { slug: "loja-slug", name: "Loja Ficha", ficha_path: "Projetos/loja-ficha/PROJETO.md" };
+  const op = originalPath({ home, cofre, store, imageId: IMG, kind: "original" });
+  check("60 originalPath: loja com ficha grava na pasta da FICHA", op.file === join(cofre, "Projetos", "loja-ficha", "marca", "originais", "60606060.jpg"), op.file);
+  check("60 pastaAntiga: sem pasta do slug = null", pastaAntiga({ home, cofre, store, outras: [] }) === null);
+  mkdirSync(join(cofre, "Projetos", "loja-slug", "marca", "originais"), { recursive: true });
+  check("60 pastaAntiga: a marca do slug existe e é outra = o caminho dela", pastaAntiga({ home, cofre, store, outras: [] }) === join(cofre, "Projetos", "loja-slug", "marca"), String(pastaAntiga({ home, cofre, store, outras: [] })));
+  check("60 gate r1 B1: a pasta do slug que é a pasta (ficha ou slug) de OUTRA loja nunca é antiga; sem a lista, null", pastaAntiga({ home, cofre, store, outras: [{ slug: "z", ficha_path: "Projetos/loja-slug/PROJETO.md" }] }) === null
+    && pastaAntiga({ home, cofre, store, outras: [{ slug: "loja-slug" }] }) === null && pastaAntiga({ home, cofre, store }) === null);
+  mkdirSync(join(cofre, "Projetos", "mesma", "marca"), { recursive: true });
+  check("60 pastaAntiga: ficha e slug na mesma pasta = null (nunca a própria pasta)", pastaAntiga({ home, cofre, store: { slug: "mesma", ficha_path: "Projetos/mesma/PROJETO.md" }, outras: [] }) === null
+    && pastaAntiga({ home, cofre, store: { slug: "mesma" }, outras: [] }) === null);
+
+  // ponta a ponta do image_get: grava na pasta da ficha e devolve pasta_antiga (sem mover nada)
+  const LOJA = "61616161-6161-4161-8161-616161616161";
+  const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("logo-60".repeat(30)), Buffer.from([0xff, 0xd9])]);
+  let lojas = [{ project_id: LOJA, name: "Loja Ficha", slug: "loja-slug", ficha_path: "Projetos/loja-ficha/PROJETO.md" }];
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/shopify/graphql?stores=1") return { json: { stores: lojas } };
+    if (c.path === `/api/images/${IMG}/file?kind=original`) return { raw: JPG, headers: { "content-type": "image/jpeg", "x-image-project": LOJA } };
+  });
+  mkdirSync(join(home, ".iron"), { recursive: true });
+  writeFileSync(join(home, ".iron", "config.yaml"), `vault_path: "${cofre}"\n`);
+  const s = startServer(home, f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  const call = (id, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "image_get", arguments: args } });
+  const js = (id) => { try { return JSON.parse(s.out.find((o) => o.msg.id === id)?.msg.result?.content?.[0]?.text ?? "{}"); } catch { return {}; } };
+  call(3, { project_id: LOJA, image_id: IMG });
+  await sleep(800);
+  const r3 = js(3);
+  check("60 image_get: grava na pasta da ficha e devolve pasta_antiga + pasta_nova + o próximo passo (ask, sem sobrescrever)", r3.ok === true && r3.path === join(cofre, "Projetos", "loja-ficha", "marca", "originais", "60606060.jpg")
+    && r3.pasta_antiga === join(cofre, "Projetos", "loja-slug", "marca") && r3.pasta_nova === join(cofre, "Projetos", "loja-ficha", "marca") && /`ask`/.test(r3.proximo ?? "") && /SEM sobrescrever/.test(r3.proximo ?? ""), JSON.stringify(r3));
+  check("60 image_get: nada é movido sozinho (a pasta antiga continua lá)", existsSync(join(cofre, "Projetos", "loja-slug", "marca", "originais")));
+  lojas = [{ project_id: LOJA, name: "Loja Ficha", slug: "loja-ficha", ficha_path: "Projetos/loja-ficha/PROJETO.md" }];
+  call(4, { project_id: LOJA, image_id: IMG });
+  await sleep(800);
+  const r4 = js(4);
+  check("60 image_get: loja numa pasta só = sem pasta_antiga", r4.ok === true && !("pasta_antiga" in r4) && !("proximo" in r4), JSON.stringify(r4));
+  // gate r1 I3: loja fora da lista (lista falhou) = erro com frase e nada gravado (antes ia pra uma pasta <id8>)
+  lojas = [];
+  call(5, { project_id: LOJA, image_id: IMG });
+  await sleep(800);
+  const t5 = s.out.find((o) => o.msg.id === 5)?.msg.result;
+  check("60 gate r1 I3: loja fora da lista = erro, nada gravado em pasta provisória", t5?.isError === true && /nada foi gravado/.test(t5?.content?.[0]?.text ?? "") && !existsSync(join(cofre, "Projetos", "61616161")), JSON.stringify(t5));
+  s.p.kill();
+  f.srv.close();
 }
 
 for (const d of lixo) {
