@@ -17,7 +17,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.30.0";
+const VERSION = "0.31.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -430,7 +430,8 @@ function linhaPrimeira(content) {
   return PEDIDO_DIRETO_RE.test(content) || pedidoTrilhaP(content) ? ENTREVISTA_DEPOIS : ENTREVISTA_DICA;
 }
 
-const TRILHA_P_DICA = "[iron-office: página na lógica de uma referência → carregue a skill office-fluxos; a 1ª resposta é a ask 'Quer que eu reaproveite frases da página de referência?']\n";
+// 0.31.0 (onda 61): a porta é a skill pagina-de-venda (npm 2.39.0): zero pergunta de voz, sem "reaproveitar frases?", formulário ANTES de montar
+const TRILHA_P_DICA = "[iron-office: página de venda → carregue a skill pagina-de-venda antes de responder (Iron antigo, sem essa skill: office-fluxos)]\n";
 const trilhaP = new Map(); // chat_id → { estado: "pedido" | "perguntou", ts }
 function trilhaPEstado(chatId) {
   const t = trilhaP.get(chatId);
@@ -506,13 +507,12 @@ function avisosDoReply(conv, body) {
   try {
     let avisos = pendenteRespondido(conv);
     trilhaPRenova(conv);
-    if (trilhaPEstado(conv) === "pedido") avisos += "\nAtenção: pedido de página na lógica de uma referência sem a ask 'Quer que eu reaproveite frases da página de referência?' antes. Mande essa ask agora, antes de chamar o iron-clone.";
     if (pedeEmProsa(body)) avisos += "\nAviso: o texto pede resposta do aluno em prosa. Pergunta ao aluno é ask com opções (ex.: 'Sim, …' e 'Depois'); mande a ask agora.";
     if (formularioEstado(conv) === "voltou") {
       formularioMarca(conv, "lembrado");
       avisos += trilhaPEstado(conv)
-        ? "\nLembrete: o formulário voltou. Agora a v2 vai pelo deliver (sem novo page_save) e, depois, a ask do gate ('Quer que eu rode o gate nessa página?'); o que o aluno pulou vira 'dado pendente' na página."
-        : "\nLembrete: o formulário voltou. Se era o último da trilha de persuasão, a v2 vai pelo deliver e, depois, a ask do gate ('Quer que eu rode o gate nessa página?'); sem isso a trilha fica sem fim.";
+        ? "\nLembrete: o formulário voltou. Na pagina-de-venda, siga para as fotos e a montagem (o que o aluno pulou fica escondido, nunca inventado); só em projeto sem Shopify a v2 vai pelo deliver e depois a ask do gate."
+        : "\nLembrete: o formulário voltou. Siga o fluxo em andamento: na pagina-de-venda, fotos e montagem; sem Shopify, a v2 pelo deliver e depois a ask do gate; sem isso a página fica sem fim.";
     }
     if (adsRefreshAvisa(conv)) avisos += ADS_REFRESH_AVISO;
     return avisos;
@@ -626,7 +626,7 @@ const TOOLS = DEGRADED
       {
         name: "deliver",
         description:
-          "Salva uma entrega (relatório, auditoria, copy longa) na tela Entregas do Iron Office e devolve { id, url }. Use antes do `reply` final de um pedido do canal; o `reply` termina com a url. Na trilha de persuasão a v2 sai por aqui (sem repetir o page_save) e a chamada seguinte é a ask do gate ('Quer que eu rode o gate nessa página?').",
+          "Salva uma entrega (relatório, auditoria, copy longa) na tela Entregas do Iron Office e devolve { id, url }. Use antes do `reply` final de um pedido do canal; o `reply` termina com a url. Página de venda (skill `pagina-de-venda` ou copy da `clone-persuasion` sem Shopify): a entrega da página sai por aqui depois do page_save (sem repetir o page_save) e a chamada seguinte é a ask do gate.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1434,7 +1434,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const proximo = kind === "referencia"
         ? "registre a próxima referência; depois da última, siga a skill `espiar` (deliver e reply)."
         : trilhaPViva()
-        ? `reply de 3 linhas (o que fez, o risco maior) → UM formulário (ask com fields) com TODAS as lacunas, do aluno e do fornecedor → reply de 1 linha com a url da entrega. Quando o formulário voltar: v2 pelo deliver (sem novo page_save) e a ask do gate ('Quer que eu rode o gate nessa página?'); no deliver do gate, page_id ${pageId}.`
+        ? `siga a skill pagina-de-venda (passo 7): deliver da página, reply com 'Para ver' e 'Para valer' e a ask do gate; sem Shopify, o fim da clone-persuasion. No deliver do gate, page_id ${pageId}.`
         : `${kind === "shopify" ? "depois do sim do aluno pra publicar ou salvar, " : "agora "}a ask 'Quer que eu rode o gate nessa página?' com 'Sim, roda o gate' e 'Depois'; no deliver do gate, page_id ${pageId}.`;
       return text(JSON.stringify({ id: pageId, status, url_aba: `${BASE}/pages?store=${id}&page=${pageId}`, proximo }));
     } catch (e) {

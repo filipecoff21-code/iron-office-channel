@@ -17258,7 +17258,7 @@ function porteiroAskCheck(text2, options, { home = homedir2() } = {}) {
 }
 
 // src/server.mjs
-var VERSION = "0.30.0";
+var VERSION = "0.31.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join4(homedir3(), ".claude", "iron-office-api-key");
@@ -17587,7 +17587,7 @@ function linhaPrimeira(content) {
   if (estado !== "novo" && estado !== "andamento") return "";
   return PEDIDO_DIRETO_RE.test(content) || pedidoTrilhaP(content) ? ENTREVISTA_DEPOIS : ENTREVISTA_DICA;
 }
-var TRILHA_P_DICA = "[iron-office: p\xE1gina na l\xF3gica de uma refer\xEAncia \u2192 carregue a skill office-fluxos; a 1\xAA resposta \xE9 a ask 'Quer que eu reaproveite frases da p\xE1gina de refer\xEAncia?']\n";
+var TRILHA_P_DICA = "[iron-office: p\xE1gina de venda \u2192 carregue a skill pagina-de-venda antes de responder (Iron antigo, sem essa skill: office-fluxos)]\n";
 var trilhaP = /* @__PURE__ */ new Map();
 function trilhaPEstado(chatId) {
   const t = trilhaP.get(chatId);
@@ -17649,11 +17649,10 @@ function avisosDoReply(conv, body) {
   try {
     let avisos = pendenteRespondido(conv);
     trilhaPRenova(conv);
-    if (trilhaPEstado(conv) === "pedido") avisos += "\nAten\xE7\xE3o: pedido de p\xE1gina na l\xF3gica de uma refer\xEAncia sem a ask 'Quer que eu reaproveite frases da p\xE1gina de refer\xEAncia?' antes. Mande essa ask agora, antes de chamar o iron-clone.";
     if (pedeEmProsa(body)) avisos += "\nAviso: o texto pede resposta do aluno em prosa. Pergunta ao aluno \xE9 ask com op\xE7\xF5es (ex.: 'Sim, \u2026' e 'Depois'); mande a ask agora.";
     if (formularioEstado(conv) === "voltou") {
       formularioMarca(conv, "lembrado");
-      avisos += trilhaPEstado(conv) ? "\nLembrete: o formul\xE1rio voltou. Agora a v2 vai pelo deliver (sem novo page_save) e, depois, a ask do gate ('Quer que eu rode o gate nessa p\xE1gina?'); o que o aluno pulou vira 'dado pendente' na p\xE1gina." : "\nLembrete: o formul\xE1rio voltou. Se era o \xFAltimo da trilha de persuas\xE3o, a v2 vai pelo deliver e, depois, a ask do gate ('Quer que eu rode o gate nessa p\xE1gina?'); sem isso a trilha fica sem fim.";
+      avisos += trilhaPEstado(conv) ? "\nLembrete: o formul\xE1rio voltou. Na pagina-de-venda, siga para as fotos e a montagem (o que o aluno pulou fica escondido, nunca inventado); s\xF3 em projeto sem Shopify a v2 vai pelo deliver e depois a ask do gate." : "\nLembrete: o formul\xE1rio voltou. Siga o fluxo em andamento: na pagina-de-venda, fotos e montagem; sem Shopify, a v2 pelo deliver e depois a ask do gate; sem isso a p\xE1gina fica sem fim.";
     }
     if (adsRefreshAvisa(conv)) avisos += ADS_REFRESH_AVISO;
     return avisos;
@@ -17754,7 +17753,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "deliver",
-    description: "Salva uma entrega (relat\xF3rio, auditoria, copy longa) na tela Entregas do Iron Office e devolve { id, url }. Use antes do `reply` final de um pedido do canal; o `reply` termina com a url. Na trilha de persuas\xE3o a v2 sai por aqui (sem repetir o page_save) e a chamada seguinte \xE9 a ask do gate ('Quer que eu rode o gate nessa p\xE1gina?').",
+    description: "Salva uma entrega (relat\xF3rio, auditoria, copy longa) na tela Entregas do Iron Office e devolve { id, url }. Use antes do `reply` final de um pedido do canal; o `reply` termina com a url. P\xE1gina de venda (skill `pagina-de-venda` ou copy da `clone-persuasion` sem Shopify): a entrega da p\xE1gina sai por aqui depois do page_save (sem repetir o page_save) e a chamada seguinte \xE9 a ask do gate.",
     inputSchema: {
       type: "object",
       properties: {
@@ -18508,7 +18507,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const pageId = res?.page?.id;
       if (typeof pageId !== "string" || !UUID_RE2.test(pageId)) return text("O Iron Office n\xE3o devolveu o id da p\xE1gina.", true);
       const status = ["no_ar", "rascunho", "fora_do_ar"].includes(res.page.status) ? res.page.status : "rascunho";
-      const proximo = kind === "referencia" ? "registre a pr\xF3xima refer\xEAncia; depois da \xFAltima, siga a skill `espiar` (deliver e reply)." : trilhaPViva() ? `reply de 3 linhas (o que fez, o risco maior) \u2192 UM formul\xE1rio (ask com fields) com TODAS as lacunas, do aluno e do fornecedor \u2192 reply de 1 linha com a url da entrega. Quando o formul\xE1rio voltar: v2 pelo deliver (sem novo page_save) e a ask do gate ('Quer que eu rode o gate nessa p\xE1gina?'); no deliver do gate, page_id ${pageId}.` : `${kind === "shopify" ? "depois do sim do aluno pra publicar ou salvar, " : "agora "}a ask 'Quer que eu rode o gate nessa p\xE1gina?' com 'Sim, roda o gate' e 'Depois'; no deliver do gate, page_id ${pageId}.`;
+      const proximo = kind === "referencia" ? "registre a pr\xF3xima refer\xEAncia; depois da \xFAltima, siga a skill `espiar` (deliver e reply)." : trilhaPViva() ? `siga a skill pagina-de-venda (passo 7): deliver da p\xE1gina, reply com 'Para ver' e 'Para valer' e a ask do gate; sem Shopify, o fim da clone-persuasion. No deliver do gate, page_id ${pageId}.` : `${kind === "shopify" ? "depois do sim do aluno pra publicar ou salvar, " : "agora "}a ask 'Quer que eu rode o gate nessa p\xE1gina?' com 'Sim, roda o gate' e 'Depois'; no deliver do gate, page_id ${pageId}.`;
       return text(JSON.stringify({ id: pageId, status, url_aba: `${BASE}/pages?store=${id}&page=${pageId}`, proximo }));
     } catch (e) {
       if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
