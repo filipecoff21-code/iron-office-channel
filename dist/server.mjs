@@ -17258,7 +17258,7 @@ function porteiroAskCheck(text2, options, { home = homedir2() } = {}) {
 }
 
 // src/server.mjs
-var VERSION = "0.31.0";
+var VERSION = "0.31.1";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join4(homedir3(), ".claude", "iron-office-api-key");
@@ -18106,7 +18106,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       let proximo = "";
       if (agent === "gate") trilhaP.clear();
       else if (voltou && trilhaPViva()) {
-        proximo = "\nAgora a ask do gate ('Quer que eu rode o gate nessa p\xE1gina?', 'Sim, roda o gate' / 'Depois'), com o page_id do page_save.";
+        proximo = "\nSiga a skill pagina-de-venda, passo 7: reply com 'Para ver' e 'Para valer' e depois a ask do gate; sem Shopify, o fim da clone-persuasion.";
         trilhaP.clear();
       }
       formulario.clear();

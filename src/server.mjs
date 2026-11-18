@@ -17,7 +17,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.31.0";
+const VERSION = "0.31.1";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -1002,12 +1002,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const id = res?.deliverable?.id;
       if (typeof id !== "string" || !id) return text("O Iron Office não devolveu o id da entrega.", true);
       const url = `${BASE}/deliverables?id=${encodeURIComponent(id)}`;
-      // 0.15.0: formulário que voltou + trilha P viva = esta é a v2 → o passo seguinte é a ask do gate; a rodada fecha
+      // 0.15.0: formulário que voltou + trilha P viva = entrega da página → a rodada fecha
+      // 0.31.1 (61.1): o passo seguinte é o mesmo do page_save (passo 7 da pagina-de-venda): reply antes da ask do gate
       const voltou = [...formulario.keys()].some((c) => ["voltou", "lembrado"].includes(formularioEstado(c)));
       let proximo = "";
       if (agent === "gate") trilhaP.clear();
       else if (voltou && trilhaPViva()) {
-        proximo = "\nAgora a ask do gate ('Quer que eu rode o gate nessa página?', 'Sim, roda o gate' / 'Depois'), com o page_id do page_save.";
+        proximo = "\nSiga a skill pagina-de-venda, passo 7: reply com 'Para ver' e 'Para valer' e depois a ask do gate; sem Shopify, o fim da clone-persuasion.";
         trilhaP.clear();
       }
       formulario.clear(); // 0.14.2: o deliver não sabe a conversa; a entrega saiu, o lembrete acaba

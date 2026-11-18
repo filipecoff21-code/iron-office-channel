@@ -1645,7 +1645,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   try { ps = JSON.parse(txt(s, 14)); } catch { /* nada */ }
   check("rev4 page_save na trilha P → onda 61: proximo manda o passo 7 da pagina-de-venda (nunca formulário depois da página), e o JSON segue com id/status/url_aba", ps.id === PAG && ps.status === "rascunho" && typeof ps.url_aba === "string" && /siga a skill pagina-de-venda \(passo 7\)/.test(ps.proximo ?? "") && /'Para ver' e 'Para valer'/.test(ps.proximo ?? "") && !/TODAS as lacunas/.test(ps.proximo ?? "") && (ps.proximo ?? "").includes(PAG), txt(s, 14));
 
-  // fim da rodada: formulário volta → lembrete da trilha → deliver (v2) avisa a ask do gate → nada pendente
+  // fim da rodada: formulário volta → lembrete da trilha → deliver da página manda o passo 7 → nada pendente
   call(s, 20, "ask", { chat_id: "c1", question: "Faltam 3 dados", fields: [{ id: "preco", label: "Preço" }, { id: "peso", label: "Peso (fornecedor)" }, { id: "sola", label: "Sola (fornecedor)" }] });
   await sleep(500);
   fila.push(msg("p3", "Preço: 189000\nPeso (fornecedor): (pulado)\nSola (fornecedor): (pulado)"));
@@ -1657,7 +1657,9 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 23, "reply", { chat_id: "c1", text: "A v2 saiu." });
   await sleep(500);
   check("rev4 fim da rodada → onda 61: formulário voltou = fotos e montagem da pagina-de-venda (pulado fica escondido)", /Na pagina-de-venda, siga para as fotos e a montagem/.test(txt(s, 21)) && /fica escondido, nunca inventado/.test(txt(s, 21)), txt(s, 21));
-  check("rev4 fim da rodada: o deliver da v2 devolve 'Agora a ask do gate'; depois, reply limpo", /"id":"d-40"/.test(txt(s, 22)) && /Agora a ask do gate/.test(txt(s, 22)) && txt(s, 23) === "Enviado ao Iron Office.", txt(s, 22) + " | " + txt(s, 23));
+  // 61.1: formulário volta → deliver da página → o retorno manda o reply ('Para ver'/'Para valer') ANTES da ask do gate
+  const d22 = txt(s, 22);
+  check("61.1 deliver na trilha P (formulário voltou): proximo = passo 7 da pagina-de-venda, reply antes da ask, sem a pergunta antiga do gate; depois, reply limpo", /"id":"d-40"/.test(d22) && /siga a skill pagina-de-venda, passo 7/i.test(d22) && /'Para ver' e 'Para valer'/.test(d22) && d22.indexOf("reply com") > -1 && d22.indexOf("reply com") < d22.indexOf("ask do gate") && !/Agora a ask do gate/.test(d22) && !/Quer que eu rode o gate nessa página\?/.test(d22) && !/Sim, roda o gate/.test(d22) && txt(s, 23) === "Enviado ao Iron Office.", d22 + " | " + txt(s, 23));
 
   // depois que a rodada fechou: page_save comum → proximo = ask do gate
   call(s, 24, "page_save", { project_id: LOJA, title: "Página de FAQ", kind: "outra", local_path: "paginas/faq" });
@@ -2825,7 +2827,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções intocado (3899) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.31.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções intocado (3899) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.31.1", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
