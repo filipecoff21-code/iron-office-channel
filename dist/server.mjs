@@ -17258,7 +17258,7 @@ function porteiroAskCheck(text2, options, { home = homedir2() } = {}) {
 }
 
 // src/server.mjs
-var VERSION = "0.31.2";
+var VERSION = "0.32.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join4(homedir3(), ".claude", "iron-office-api-key");
@@ -17396,7 +17396,20 @@ function storePrefix(store) {
 }
 var UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var PAGE_KINDS = ["landing", "clone", "shopify", "outra", "referencia"];
-var ASK_LINKS = ["dropkiller", "shopify"];
+var ASK_LINKS = ["dropkiller", "shopify", "droplatam"];
+var SLIM_KEYS = ["status", "total", "supplier_cost", "shipping", "created_at", "currency"];
+function slimOrders(list) {
+  return list.map((o) => {
+    const out = {};
+    if (!o || typeof o !== "object" || Array.isArray(o)) return out;
+    for (const k of SLIM_KEYS) {
+      if (!(k in o)) continue;
+      const v = o[k];
+      out[k] = typeof v === "string" ? redactKeys(v, 80).text : v;
+    }
+    return out;
+  });
+}
 var Q_IMAGES_MAX = 8;
 var SPY_RESPONSE_MAX = 3e4;
 function pageUrlArg(v) {
@@ -17808,7 +17821,7 @@ var TOOLS = DEGRADED ? [
           description: "Opcional: formul\xE1rio, 1 a 12 campos { id (a-z, 0-9, _; at\xE9 24), label (at\xE9 80), placeholder (at\xE9 60), kind: text | number | money | yesno }. Com fields, n\xE3o mande options.",
           items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, kind: { type: "string", enum: FIELD_KINDS } }, required: ["id", "label"] }
         },
-        link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um bot\xE3o com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o bot\xE3o n\xE3o aparece, ent\xE3o o texto da pergunta tem que valer sozinho). Nunca uma URL." },
+        link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um bot\xE3o com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o bot\xE3o n\xE3o aparece, ent\xE3o o texto da pergunta tem que valer sozinho); 'droplatam' = Criar minha conta na Droplatam (o site abre a escolha do pa\xEDs com o link da comunidade). Nunca uma URL." },
         images: { type: "array", items: { type: "string" }, description: "Opcional (onda 59): escolha entre imagens = `images` com 1 a 8 ids COMPLETOS da aba Imagens (os do image_generate); o site mostra as miniaturas e o clique volta como 'imagem escolhida: <id>'. Nunca mande link de imagem no `reply` pra escolher. Com images, options e free s\xE3o opcionais." },
         vector: { type: "string", description: "Opcional (0.29.1): depois do image_vectorize, `vector` = o id COMPLETO da imagem. O site troca a pergunta por 'O vetor ficou igual ao seu logo?' com os bot\xF5es 'Sim, ficou igual' e 'N\xE3o ficou igual' (o Sim aprova com a sess\xE3o do aluno). Vai sozinho: sem options, fields, images ou link." },
         project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da \xFAltima mensagem." }
@@ -17869,7 +17882,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "operation_status",
-    description: "Diz se a loja d\xE1 lucro (onda 58): o SITE l\xEA a opera\xE7\xE3o de pagamento na entrega (Master Shop, com a chave que fica cifrada no servidor e nunca vem pra c\xE1) e junta com o gasto da Meta do MESMO per\xEDodo, do retrato de an\xFAncios j\xE1 guardado. Devolve { connected, operator, window_days, retrato: { sales_net, sales_count, charges, charges_total, other_income, withdrawals, balance, orders, in_transit_potential, currency, truncated }, ads: { spend, currency, saved_at } | null, fx, profit, profit_currency, phrase, in_transit, reason }. Copie os n\xFAmeros e a `phrase` como vieram: NUNCA recalcule nem converta moeda por conta pr\xF3pria. Saque (withdrawals) n\xE3o \xE9 lucro: \xE9 dinheiro que j\xE1 era do aluno. Pedido 'a caminho' ainda n\xE3o entrou: diga sempre a linha `in_transit`. profit null: reason 'sem_anuncios' ou 'anuncios_velhos' (o retrato de an\xFAncios desse per\xEDodo falta ou venceu: atualize-o antes, pela skill `anuncios`, e chame de novo) ou 'sem_cotacao' (mostre os dois lados, cada um na sua moeda). retrato.truncated true = leitura parcial: diga que pode faltar movimento (a `phrase` j\xE1 come\xE7a assim). connected false = a loja n\xE3o tem opera\xE7\xE3o conectada: ofere\xE7a em 1 linha conectar a Master Shop em Integra\xE7\xF5es (ironoffice.app/integrations). S\xF3 agregados: nenhum cliente, pedido ou chave volta.",
+    description: "Diz se a loja d\xE1 lucro (onda 58): o SITE l\xEA a opera\xE7\xE3o de pagamento na entrega (Master Shop, com a chave que fica cifrada no servidor e nunca vem pra c\xE1) e junta com o gasto da Meta do MESMO per\xEDodo, do retrato de an\xFAncios j\xE1 guardado. Devolve { connected, operator, window_days, retrato: { sales_net, sales_count, charges, charges_total, other_income, withdrawals, balance, orders, in_transit_potential, currency, truncated }, ads: { spend, currency, saved_at } | null, fx, profit, profit_currency, phrase, in_transit, reason }. Copie os n\xFAmeros e a `phrase` como vieram: NUNCA recalcule nem converta moeda por conta pr\xF3pria. Saque (withdrawals) n\xE3o \xE9 lucro: \xE9 dinheiro que j\xE1 era do aluno. Pedido 'a caminho' ainda n\xE3o entrou: diga sempre a linha `in_transit`. profit null: reason 'sem_anuncios' ou 'anuncios_velhos' (o retrato de an\xFAncios desse per\xEDodo falta ou venceu: atualize-o antes, pela skill `anuncios`, e chame de novo) ou 'sem_cotacao' (mostre os dois lados, cada um na sua moeda). retrato.truncated true = leitura parcial: diga que pode faltar movimento (a `phrase` j\xE1 come\xE7a assim). connected false = a loja n\xE3o tem opera\xE7\xE3o conectada: ofere\xE7a em 1 linha conectar a Master Shop, a Droplatam ou a Dropi em Integra\xE7\xF5es (ironoffice.app/integrations). Droplatam/Dropi (onda 65): o retrato \xE9 o que voc\xEA gravou com `operation_save`; reason 'operacao_velha' = leitura vencida (leia de novo e grave); 'sem_custo' = pedido entregue sem custo do fornecedor ou frete: diga que n\xE3o d\xE1 pra afirmar se sobrou. S\xF3 agregados: nenhum cliente, pedido ou chave volta.",
     inputSchema: {
       type: "object",
       properties: {
@@ -17877,6 +17890,22 @@ var TOOLS = DEGRADED ? [
         days: { type: "integer", enum: [1, 7, 15, 30], description: "per\xEDodo contando hoje (1 = hoje); padr\xE3o 7." }
       },
       required: ["project_id"]
+    }
+  },
+  {
+    name: "operation_save",
+    description: 'Onda 65 (skill `anuncios`): grava no site os pedidos da Droplatam ou da Dropi que voc\xEA leu pelo conector oficial (s\xF3 `list_orders`), pra o SITE montar o retrato e a conta de lucro. Mande UM objeto por pedido criado no per\xEDodo, s\xF3 com { status (o estado como veio), total (n\xFAmero, o que o comprador paga), supplier_cost (n\xFAmero ou null se o pedido n\xE3o traz o custo do fornecedor), shipping (n\xFAmero ou null se n\xE3o traz o frete), created_at (data/hora como veio, AAAA-MM-DD\u2026), currency (COP, MXN\u2026) }. NUNCA nome, telefone, endere\xE7o, documento, e-mail, id ou guia: o plugin apaga qualquer outra chave e o site recusa. N\xFAmeros como n\xFAmero (12500, nunca "12.500"). N\xE3o invente custo: sem o campo, null. truncated: true se parou antes da \xFAltima p\xE1gina. Depois chame `operation_status` e copie a `phrase`.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "id da loja (o `id:` da linha [loja: \u2026])." },
+        operator: { type: "string", enum: ["droplatam", "dropi"] },
+        window_days: { type: "integer", enum: [1, 7, 15, 30], description: "o MESMO per\xEDodo do retrato de an\xFAncios." },
+        orders: { type: "array", maxItems: 2e3, items: { type: "object" } },
+        truncated: { type: "boolean" },
+        read_at: { type: "string", description: "quando voc\xEA leu (ISO)." }
+      },
+      required: ["project_id", "operator", "window_days", "orders"]
     }
   },
   {
@@ -18205,7 +18234,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
     const link = args.link;
-    if (link !== void 0 && (typeof link !== "string" || !ASK_LINKS.includes(link))) return text("link: s\xF3 as chaves 'dropkiller' e 'shopify' existem hoje.", true);
+    if (link !== void 0 && (typeof link !== "string" || !ASK_LINKS.includes(link))) return text("link: s\xF3 as chaves 'dropkiller', 'shopify' e 'droplatam' existem hoje.", true);
     if (raw.length > Q_OPTIONS_MAX) return text(`Op\xE7\xF5es demais (${raw.length}; m\xE1ximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;
@@ -18623,6 +18652,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(`N\xE3o deu pra medir a velocidade: ${String(why).replace(/[.\s]+$/, "")}.`, true);
     }
   }
+  if (name === "operation_save") {
+    const id = String(args.project_id ?? "").trim();
+    if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
+    if (!["droplatam", "dropi"].includes(args.operator)) return text("operator tem que ser droplatam ou dropi.", true);
+    if (![1, 7, 15, 30].includes(args.window_days)) return text("window_days tem que ser 1, 7, 15 ou 30.", true);
+    if (!Array.isArray(args.orders) || args.orders.length > 2e3) return text("orders tem que ser uma lista de at\xE9 2.000 pedidos.", true);
+    const orders = slimOrders(args.orders);
+    const body = { operator: args.operator, window_days: args.window_days, orders, truncated: args.truncated === true, ...typeof args.read_at === "string" ? { read_at: args.read_at.slice(0, 40) } : {} };
+    try {
+      const res = await api(`/api/stores/${id}/operation/save`, { method: "POST", body, timeoutMs: 3e4 });
+      return text(JSON.stringify({ ok: true, saved_at: res.saved_at ?? null, window_days: res.window_days ?? args.window_days, orders_total: res.orders_total ?? null, costs_missing: res.costs_missing ?? 0 }));
+    } catch (e) {
+      if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
+      const why = e.status === 404 ? "loja n\xE3o encontrada nesta conta (confira o project_id no shop_status)" : redactKeys(String(e.message ?? ""), 300).text;
+      return text(`N\xE3o deu pra gravar a opera\xE7\xE3o: ${String(why).replace(/[.\s]+$/, "")}.`, true);
+    }
+  }
   if (name === "operation_status") {
     const id = String(args.project_id ?? "").trim();
     if (!UUID_RE2.test(id)) return text("project_id inv\xE1lido: use o id da loja (linha [loja: \u2026] ou shop_status).", true);
@@ -18642,7 +18688,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         profit_currency: res.profit_currency ?? null,
         phrase: res.phrase ?? null,
         in_transit: res.in_transit ?? null,
-        reason: res.reason ?? null
+        reason: res.reason ?? null,
+        ...typeof res.saved_at === "string" ? { saved_at: res.saved_at, stale: res.stale === true } : {}
       };
       return text(JSON.stringify(out));
     } catch (e) {
@@ -19002,6 +19049,8 @@ if (!DEGRADED) {
   });
 }
 export {
+  SLIM_KEYS,
   cardLinks,
-  cardWithLinks
+  cardWithLinks,
+  slimOrders
 };

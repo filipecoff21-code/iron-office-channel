@@ -1,6 +1,6 @@
 ---
 name: office-fluxos
-description: Fluxos do Iron Office que não cabem nas instruções do canal. Carregar ANTES de agir quando o pedido do site for página de venda (skill `pagina-de-venda`), página pronta (gate por botão), dados que faltam (formulário), cancelar pedido, nota ou etiqueta de pedido, criar loja na Shopify, ou mensagem do sistema.
+description: Fluxos do Iron Office que não cabem nas instruções do canal. Carregar ANTES de agir quando o pedido do site for página de venda (skill `pagina-de-venda`), página pronta (gate por botão), dados que faltam (formulário), cancelar pedido, nota ou etiqueta de pedido, criar loja na Shopify, conectar a Droplatam ou a Dropi (`droplatam: conectar`, `dropi: conectar`, 'quero conectar a Droplatam', 'uso a Dropi'), ou mensagem do sistema.
 ---
 
 # Fluxos do Iron Office
@@ -30,6 +30,18 @@ LOTE: se chegaram duas ou mais tags `<channel>` antes de você responder (clique
 ## Criar a loja na Shopify
 
 'Quero criar minha loja', 'criar a Shopify', 'criar outra loja', 'segunda loja', ou a etapa `loja` sem Shopify: UMA `ask` com `link: "shopify"` (o site desenha o botão 'Criar minha loja na Shopify') e as opções 'Já criei a loja' · 'Agora não'. Sem o link configurado o botão some: o texto vale sozinho ('Crie a sua loja na Shopify e me diga quando terminar'), nunca só 'clique no botão abaixo', e nunca escreva URL. Clicar no botão não responde. 'Já criei': Integrações → cartão do projeto → 'Mudar pra Loja Shopify' e conectar (ou 'Conectar'). Projeto de cliente (`kind: cliente`): sem `link`. 'Outra loja' com a loja ativa já conectada: a pergunta diz antes, em 1 linha, que loja nova pede projeto novo (seletor de projeto → Novo projeto); você não cria projeto.
+
+## Conectar a Droplatam ou a Dropi (onda 65)
+
+Aluno fala da Droplatam sem o conector (nenhuma ferramenta `mcp__droplatam__*` nesta sessão) e sem dizer que já tem conta: UMA `ask` "Já tem conta na Droplatam?" com 'Não, quero criar' · 'Já tenho' e `link: "droplatam"` (o site abre a escolha do país com o link da comunidade: taxa zero). Nunca escreva o link. 'Não, quero criar': 1 linha ("Escolha o país no botão, crie a conta e mande os documentos; depois me diga: droplatam: conectar"). 'Já tenho': siga abaixo.
+
+`droplatam: conectar` (ou 'Já tenho'): rode pelo Bash, exatamente:
+
+```
+claude mcp add --scope user --transport http droplatam https://mcp.droplatam.com.br/mcp
+```
+
+`dropi: conectar`: o mesmo com `dropi https://mcp.dropi.co/mcp`. "already exists" = ok; outro erro: diga em 1 linha. Depois UM `reply`: "Conector registrado. Agora: 1) feche o Iron (Ctrl+C duas vezes) e abra de novo com `ironoffice`; 2) digite `/mcp`, escolha `droplatam` (ou `dropi`) e Authenticate: entre com a SUA conta e escolha o mesmo país da conta; 3) na aba Anúncios, clique em Atualizar agora." Nunca peça senha nem código. O Iron só LÊ: com a conta conectada, nunca crie, cancele nem cote pedido (`create_order` e `quote_shipping` ficam bloqueados pelo `ironoffice`); pedido do aluno pra criar pedido = 1 linha "Pelo Iron Office eu só leio a operação; pedido novo você cria no painel da Droplatam/Dropi."
 
 ## Pedidos da Shopify com confirmação
 

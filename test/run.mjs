@@ -1749,7 +1749,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   await sleep(400);
   const ask = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ask");
-  check("43 ask: inputSchema.link.enum começa por 'dropkiller' (57: + 'shopify') e a descrição cita link: \"dropkiller\"", JSON.stringify(ask?.inputSchema?.properties?.link?.enum) === '["dropkiller","shopify"]' && (ask?.description ?? "").includes('link: "dropkiller"'));
+  check("43 ask: inputSchema.link.enum começa por 'dropkiller' (57: + 'shopify'; 65: + 'droplatam') e a descrição cita link: \"dropkiller\"", JSON.stringify(ask?.inputSchema?.properties?.link?.enum) === '["dropkiller","shopify","droplatam"]' && (ask?.description ?? "").includes('link: "dropkiller"'));
   const antes = f.calls.filter((c) => c.path === "/api/chat/messages").length;
   call(s, 10, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Já assinei: liga o DropKiller", "Depois"], skip: true, link: "dropkiller" });
   await sleep(500);
@@ -1758,7 +1758,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("43 ask com link 'dropkiller' → o site recebe meta.question.link = 'dropkiller' (com as opções)", enviadas.length === antes + 1 && q?.link === "dropkiller" && q?.options?.length === 2 && res(s, 10)?.isError !== true, JSON.stringify(q));
   call(s, 11, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: "loja" });
   await sleep(400);
-  check("43 ask com link desconhecido ('loja') → isError, nada enviado (57: a mensagem cita as duas chaves)", res(s, 11)?.isError === true && txt(s, 11).includes("'dropkiller' e 'shopify'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
+  check("43 ask com link desconhecido ('loja') → isError, nada enviado (57: a mensagem cita as duas chaves)", res(s, 11)?.isError === true && txt(s, 11).includes("'dropkiller', 'shopify' e 'droplatam'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
   call(s, 14, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: ["dropkiller"] });
   await sleep(400);
   check("43 ask com link em lista (['dropkiller']) → recusado como o site recusa, nada enviado", res(s, 14)?.isError === true && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 14));
@@ -2831,7 +2831,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.31.2", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.32.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
@@ -3029,6 +3029,46 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(800);
   const t5 = s.out.find((o) => o.msg.id === 5)?.msg.result;
   check("60 gate r1 I3: loja fora da lista = erro, nada gravado em pasta provisória", t5?.isError === true && /nada foi gravado/.test(t5?.content?.[0]?.text ?? "") && !existsSync(join(cofre, "Projetos", "61616161")), JSON.stringify(t5));
+  s.p.kill();
+  f.srv.close();
+}
+
+// ─── onda 65 (0.32.0): operation_save grava a Droplatam/Dropi com lista branca; ask com link droplatam ───
+{
+  console.log("onda 65 (0.32.0)");
+  const LOJA = "65656565-6565-4565-8565-656565656565", LONGE = "66666666-6666-4666-8666-666666666666";
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === `/api/stores/${LOJA}/operation/save`) return { json: { ok: true, saved_at: "2026-11-23T18:00:00Z", window_days: 7, orders_total: 2, costs_missing: 0 } };
+    if (c.path === `/api/stores/${LONGE}/operation/save`) return { status: 401, json: { error: "Não autorizado" } };
+    if (c.path === "/api/chat/messages") return { json: { id: "q-65" } };
+  });
+  const call = (s, id, name, args) => s.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const result = (s, id) => s.out.find((o) => o.msg.id === id)?.msg.result;
+  const txt = (s, id) => result(s, id)?.content?.[0]?.text ?? "";
+  const s = startServer(casa(), f.url, { IRON_OFFICE_CHANNEL: "1" });
+  s.handshake();
+  await sleep(1500);
+  const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
+  check("65 bloco de instruções intocado (BLOCO_ATUAL) e versão 0.32.0", (init?.instructions ?? "").length === BLOCO_ATUAL && init?.serverInfo?.version === "0.32.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  s.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+  const ped = (x = {}) => ({ status: "ENTREGADO", total: 100000, supplier_cost: 40000, shipping: 15000, created_at: "2026-11-23 10:00", currency: "COP", ...x });
+  call(s, 3, "operation_save", { project_id: LOJA, operator: "droplatam", window_days: 7, orders: [ped({ nombre: "Fulano de Tal", telefono: "3001234567", direccion: "Calle 1", id: 93204655, guia: "G123" }), ped({ status: "CANCELADO", email: "x@y.com" })] });
+  call(s, 4, "operation_save", { project_id: LOJA, operator: "droplatam", window_days: 10, orders: [] });
+  call(s, 5, "operation_save", { project_id: LOJA, operator: "mastershop", window_days: 7, orders: [] });
+  call(s, 6, "operation_save", { project_id: LONGE, operator: "dropi", window_days: 7, orders: [] });
+  call(s, 7, "ask", { question: "Já tem conta na Droplatam?", options: [{ id: "nao", label: "Não, quero criar" }, { id: "sim", label: "Já tenho" }], skip: true, link: "droplatam" });
+  await sleep(1200);
+  const tool = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "operation_save");
+  check("65 operation_save existe com operator droplatam|dropi e janela 1/7/15/30", !!tool && JSON.stringify(tool.inputSchema.properties.operator.enum) === '["droplatam","dropi"]' && JSON.stringify(tool.inputSchema.properties.window_days.enum) === "[1,7,15,30]" && /NUNCA nome/.test(tool.description), JSON.stringify(tool?.inputSchema));
+  const hit = f.calls.find((c) => c.path === `/api/stores/${LOJA}/operation/save`);
+  const sent = JSON.stringify(hit?.body ?? {});
+  check("65 lista branca: nome, telefone, endereço, id, guia e e-mail NÃO saem do computador", !!hit && hit.method === "POST" && hit.key === KEY && !/Fulano|3001234567|Calle|93204655|G123|x@y\.com|nombre|telefono|email/.test(sent) && hit.body.orders.length === 2 && hit.body.orders[0].total === 100000 && Object.keys(hit.body.orders[0]).sort().join() === "created_at,currency,shipping,status,supplier_cost,total", sent);
+  check("65 resposta curta com saved_at e orders_total", /"saved_at":"2026-11-23T18:00:00Z"/.test(txt(s, 3)) && /"orders_total":2/.test(txt(s, 3)), txt(s, 3));
+  check("65 janela inválida e operadora fora da lista: recusadas sem rede", result(s, 4)?.isError === true && result(s, 5)?.isError === true && f.calls.filter((c) => c.path.endsWith("/operation/save")).length === 2, `${txt(s, 4)} | ${txt(s, 5)}`);
+  check("65 erro 401 vira a frase da chave", result(s, 6)?.isError === true && /Chave do Iron Office inválida/.test(txt(s, 6)), txt(s, 6));
+  const askHit = f.calls.find((c) => c.path === "/api/chat/messages" && JSON.stringify(c.body).includes("droplatam"));
+  check("65 ask aceita link droplatam (o site desenha o modal de países)", result(s, 7)?.isError !== true && !!askHit, txt(s, 7));
   s.p.kill();
   f.srv.close();
 }
