@@ -17398,14 +17398,24 @@ var UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 var PAGE_KINDS = ["landing", "clone", "shopify", "outra", "referencia"];
 var ASK_LINKS = ["dropkiller", "shopify", "droplatam"];
 var SLIM_KEYS = ["status", "total", "supplier_cost", "shipping", "created_at", "currency"];
+var STATUS_OK = /^[\p{L}_ ()\-.,]{1,60}$/u;
+var DATE_OK = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+var num = (v) => v === null || typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : void 0;
 function slimOrders(list) {
   return list.map((o) => {
     const out = {};
     if (!o || typeof o !== "object" || Array.isArray(o)) return out;
-    for (const k of SLIM_KEYS) {
+    if (typeof o.status === "string" && STATUS_OK.test(o.status.trim())) out.status = o.status.trim();
+    for (const k of ["total", "supplier_cost", "shipping"]) {
       if (!(k in o)) continue;
-      const v = o[k];
-      out[k] = typeof v === "string" ? redactKeys(v, 80).text : v;
+      const v = num(o[k]);
+      if (v !== void 0) out[k] = v;
+    }
+    if (typeof o.created_at === "string" && DATE_OK.test(o.created_at.trim())) out.created_at = o.created_at.trim();
+    if (typeof o.currency === "string" && /^[A-Z]{3}$/.test(o.currency)) out.currency = o.currency;
+    const id = o.id ?? o.order_id;
+    if (typeof id === "string" && id.trim() || typeof id === "number" && Number.isFinite(id)) {
+      out.key = createHash2("sha256").update(String(id).trim()).digest("hex").slice(0, 16);
     }
     return out;
   });
@@ -17894,7 +17904,7 @@ var TOOLS = DEGRADED ? [
   },
   {
     name: "operation_save",
-    description: 'Onda 65 (skill `anuncios`): grava no site os pedidos da Droplatam ou da Dropi que voc\xEA leu pelo conector oficial (s\xF3 `list_orders`), pra o SITE montar o retrato e a conta de lucro. Mande UM objeto por pedido criado no per\xEDodo, s\xF3 com { status (o estado como veio), total (n\xFAmero, o que o comprador paga), supplier_cost (n\xFAmero ou null se o pedido n\xE3o traz o custo do fornecedor), shipping (n\xFAmero ou null se n\xE3o traz o frete), created_at (data/hora como veio, AAAA-MM-DD\u2026), currency (COP, MXN\u2026) }. NUNCA nome, telefone, endere\xE7o, documento, e-mail, id ou guia: o plugin apaga qualquer outra chave e o site recusa. N\xFAmeros como n\xFAmero (12500, nunca "12.500"). N\xE3o invente custo: sem o campo, null. truncated: true se parou antes da \xFAltima p\xE1gina. Depois chame `operation_status` e copie a `phrase`.',
+    description: 'Onda 65 (skill `anuncios`): grava no site os pedidos da Droplatam ou da Dropi que voc\xEA leu pelo conector oficial (s\xF3 `list_orders`), pra o SITE montar o retrato e a conta de lucro. Mande UM objeto por pedido criado no per\xEDodo, s\xF3 com { id (o id do pedido: o plugin troca por um hash e o id n\xE3o sai daqui), status (o estado como veio), total (n\xFAmero, o que o comprador paga), supplier_cost (n\xFAmero ou null se o pedido n\xE3o traz o custo do fornecedor), shipping (n\xFAmero ou null se n\xE3o traz o frete), created_at (data/hora como veio, AAAA-MM-DD\u2026), currency (COP, MXN\u2026) } e expected_count = a soma dos `count` das p\xE1ginas. NUNCA nome, telefone, endere\xE7o, documento, e-mail ou guia: o plugin apaga qualquer outra chave e valor fora do formato, e o site recusa. Se o list_orders deu erro, N\xC3O chame operation_save. N\xFAmeros como n\xFAmero (12500, nunca "12.500"). N\xE3o invente custo: sem o campo, null. truncated: true se parou antes da \xFAltima p\xE1gina. Depois chame `operation_status` e copie a `phrase`.',
     inputSchema: {
       type: "object",
       properties: {
@@ -17902,10 +17912,11 @@ var TOOLS = DEGRADED ? [
         operator: { type: "string", enum: ["droplatam", "dropi"] },
         window_days: { type: "integer", enum: [1, 7, 15, 30], description: "o MESMO per\xEDodo do retrato de an\xFAncios." },
         orders: { type: "array", maxItems: 2e3, items: { type: "object" } },
+        expected_count: { type: "integer", description: "a soma do `count` que o list_orders devolveu (o total que a Dropi contou). O site recusa se n\xE3o bater com os pedidos enviados." },
         truncated: { type: "boolean" },
         read_at: { type: "string", description: "quando voc\xEA leu (ISO)." }
       },
-      required: ["project_id", "operator", "window_days", "orders"]
+      required: ["project_id", "operator", "window_days", "orders", "expected_count"]
     }
   },
   {
@@ -18451,13 +18462,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (args.dry_run !== void 0 && args.dry_run !== null && typeof args.dry_run !== "boolean") return text("dry_run tem que ser true ou false.", true);
     const body = { terms, ...args.country ? { country: args.country } : {}, ...args.count ? { count: args.count } : {}, dry_run: args.dry_run === true, ...typeof args.quote === "string" ? { quote: args.quote.slice(0, 120) } : {} };
     const safe = (v, max) => typeof v === "string" ? redactKeys(v, max).text : null;
-    const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
-    const slimItem = (a) => ({ page_name: safe(a?.page_name, 120), days: num(a?.days), is_active: a?.is_active === true, ads_count: num(a?.ads_count), collation_count: num(a?.collation_count), link_url: safe(a?.link_url, 200), host: safe(a?.host, 200), cta_text: safe(a?.cta_text, 60), title: safe(a?.title, 120), body: safe(a?.body, 240), platforms: Array.isArray(a?.platforms) ? a.platforms.filter((p) => typeof p === "string").slice(0, 8) : [] });
-    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, ad_library_url: typeof r?.ad_library_url === "string" ? pageUrlArg(r.ad_library_url) : null, page_name: safe(r?.page_name, 120), start_date: num(r?.start_date), days: num(r?.days), ads_active: num(r?.ads_active), marketplace: r?.marketplace === true, category: safe(r?.category, 40), hits: num(r?.hits) });
+    const num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
+    const slimItem = (a) => ({ page_name: safe(a?.page_name, 120), days: num2(a?.days), is_active: a?.is_active === true, ads_count: num2(a?.ads_count), collation_count: num2(a?.collation_count), link_url: safe(a?.link_url, 200), host: safe(a?.host, 200), cta_text: safe(a?.cta_text, 60), title: safe(a?.title, 120), body: safe(a?.body, 240), platforms: Array.isArray(a?.platforms) ? a.platforms.filter((p) => typeof p === "string").slice(0, 8) : [] });
+    const slimRef = (r) => ({ host: safe(r?.host, 200), link_url: typeof r?.link_url === "string" ? pageUrlArg(r.link_url) : null, ad_library_url: typeof r?.ad_library_url === "string" ? pageUrlArg(r.ad_library_url) : null, page_name: safe(r?.page_name, 120), start_date: num2(r?.start_date), days: num2(r?.days), ads_active: num2(r?.ads_active), marketplace: r?.marketplace === true, category: safe(r?.category, 40), hits: num2(r?.hits) });
     const slimDropped = (r) => ({ host: safe(r?.host, 200), page_name: safe(r?.page_name, 120), reason: r?.reason === "marketplace" ? "marketplace" : "sem o produto" });
     try {
       const res = await api(`/api/stores/${id}/spy`, { method: "POST", body, timeoutMs: 27e4 });
-      const pick2 = { ok: res.ok === true, estimate_usd: num(res.estimate_usd), runs_left: num(res.runs_left), quote: safe(res.quote, 120), quote_expires_at: safe(res.quote_expires_at, 40), run_id: safe(res.run_id, 40) };
+      const pick2 = { ok: res.ok === true, estimate_usd: num2(res.estimate_usd), runs_left: num2(res.runs_left), quote: safe(res.quote, 120), quote_expires_at: safe(res.quote_expires_at, 40), run_id: safe(res.run_id, 40) };
       if (Array.isArray(res.references)) pick2.references = res.references.slice(0, 5).map(slimRef).filter((r) => r.link_url);
       if (Array.isArray(res.dropped)) pick2.dropped = res.dropped.slice(0, 10).map(slimDropped);
       if (res.searched && typeof res.searched === "object") pick2.searched = { terms: Array.isArray(res.searched.terms) ? res.searched.terms.map((t) => safe(t, 60)) : [], country: safe(res.searched.country, 2), tokens: Array.isArray(res.searched.tokens) ? res.searched.tokens.filter((t) => typeof t === "string").slice(0, 12).map((t) => safe(t, 30)) : [] };
@@ -18659,14 +18670,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (![1, 7, 15, 30].includes(args.window_days)) return text("window_days tem que ser 1, 7, 15 ou 30.", true);
     if (!Array.isArray(args.orders) || args.orders.length > 2e3) return text("orders tem que ser uma lista de at\xE9 2.000 pedidos.", true);
     const orders = slimOrders(args.orders);
-    const body = { operator: args.operator, window_days: args.window_days, orders, truncated: args.truncated === true, ...typeof args.read_at === "string" ? { read_at: args.read_at.slice(0, 40) } : {} };
+    if (!Number.isInteger(args.expected_count) || args.expected_count < 0) return text("expected_count \xE9 obrigat\xF3rio: a soma do `count` que o list_orders devolveu em cada p\xE1gina.", true);
+    const body = { operator: args.operator, window_days: args.window_days, orders, expected_count: args.expected_count, truncated: args.truncated === true, ...typeof args.read_at === "string" ? { read_at: args.read_at.slice(0, 40) } : {} };
     try {
       const res = await api(`/api/stores/${id}/operation/save`, { method: "POST", body, timeoutMs: 3e4 });
-      return text(JSON.stringify({ ok: true, saved_at: res.saved_at ?? null, window_days: res.window_days ?? args.window_days, orders_total: res.orders_total ?? null, costs_missing: res.costs_missing ?? 0 }));
+      return text(JSON.stringify({ ok: true, saved_at: res.saved_at ?? null, window_days: res.window_days ?? args.window_days, orders_total: res.orders_total ?? null, costs_missing: res.costs_missing ?? 0, duplicates: res.duplicates ?? 0, unknown_states: res.unknown_states ?? 0 }));
     } catch (e) {
       if (e instanceof AuthError) return text("Chave do Iron Office inv\xE1lida: refa\xE7a o passo 2 em ironoffice.app/onboarding.", true);
       const why = e.status === 404 ? "loja n\xE3o encontrada nesta conta (confira o project_id no shop_status)" : redactKeys(String(e.message ?? ""), 300).text;
-      return text(`N\xE3o deu pra gravar a opera\xE7\xE3o: ${String(why).replace(/[.\s]+$/, "")}.`, true);
+      return text(`N\xE3o deu pra gravar a opera\xE7\xE3o (nada mudou no site): ${String(why).replace(/[.\s]+$/, "")}.`, true);
     }
   }
   if (name === "operation_status") {

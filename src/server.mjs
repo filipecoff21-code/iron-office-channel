@@ -210,15 +210,29 @@ const ASK_LINKS = ["dropkiller", "shopify", "droplatam"];
 
 // Onda 65: lista branca dos pedidos da Droplatam/Dropi. Só estes 6 campos saem do computador do aluno; qualquer outra
 // chave (nome, telefone, endereço, documento, id, guia) é apagada AQUI, antes do site (que também recusa).
+// Gate r1: o VALOR também é conferido (nome dentro de `status`, objeto dentro de `total`): número finito ou null nos
+// valores; status só letras, espaço, hífen e parênteses (até 60); data no formato AAAA-MM-DD…; moeda com 3 letras. O
+// que não passa SOME do pedido (e o site recusa o lote por campo faltando). O id do pedido vira `key` = hash curto
+// (só pra não contar o mesmo pedido duas vezes); o id em si nunca sai do computador.
 export const SLIM_KEYS = ["status", "total", "supplier_cost", "shipping", "created_at", "currency"];
+const STATUS_OK = /^[\p{L}_ ()\-.,]{1,60}$/u;
+const DATE_OK = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+const num = (v) => (v === null || (typeof v === "number" && Number.isFinite(v) && v >= 0)) ? v : undefined;
 export function slimOrders(list) {
   return list.map((o) => {
     const out = {};
     if (!o || typeof o !== "object" || Array.isArray(o)) return out;
-    for (const k of SLIM_KEYS) {
+    if (typeof o.status === "string" && STATUS_OK.test(o.status.trim())) out.status = o.status.trim();
+    for (const k of ["total", "supplier_cost", "shipping"]) {
       if (!(k in o)) continue;
-      const v = o[k];
-      out[k] = typeof v === "string" ? redactKeys(v, 80).text : v;
+      const v = num(o[k]);
+      if (v !== undefined) out[k] = v;
+    }
+    if (typeof o.created_at === "string" && DATE_OK.test(o.created_at.trim())) out.created_at = o.created_at.trim();
+    if (typeof o.currency === "string" && /^[A-Z]{3}$/.test(o.currency)) out.currency = o.currency;
+    const id = o.id ?? o.order_id;
+    if ((typeof id === "string" && id.trim()) || (typeof id === "number" && Number.isFinite(id))) {
+      out.key = createHash("sha256").update(String(id).trim()).digest("hex").slice(0, 16);
     }
     return out;
   });
@@ -780,7 +794,7 @@ const TOOLS = DEGRADED
       {
         name: "operation_save",
         description:
-          "Onda 65 (skill `anuncios`): grava no site os pedidos da Droplatam ou da Dropi que você leu pelo conector oficial (só `list_orders`), pra o SITE montar o retrato e a conta de lucro. Mande UM objeto por pedido criado no período, só com { status (o estado como veio), total (número, o que o comprador paga), supplier_cost (número ou null se o pedido não traz o custo do fornecedor), shipping (número ou null se não traz o frete), created_at (data/hora como veio, AAAA-MM-DD…), currency (COP, MXN…) }. NUNCA nome, telefone, endereço, documento, e-mail, id ou guia: o plugin apaga qualquer outra chave e o site recusa. Números como número (12500, nunca \"12.500\"). Não invente custo: sem o campo, null. truncated: true se parou antes da última página. Depois chame `operation_status` e copie a `phrase`.",
+          "Onda 65 (skill `anuncios`): grava no site os pedidos da Droplatam ou da Dropi que você leu pelo conector oficial (só `list_orders`), pra o SITE montar o retrato e a conta de lucro. Mande UM objeto por pedido criado no período, só com { id (o id do pedido: o plugin troca por um hash e o id não sai daqui), status (o estado como veio), total (número, o que o comprador paga), supplier_cost (número ou null se o pedido não traz o custo do fornecedor), shipping (número ou null se não traz o frete), created_at (data/hora como veio, AAAA-MM-DD…), currency (COP, MXN…) } e expected_count = a soma dos `count` das páginas. NUNCA nome, telefone, endereço, documento, e-mail ou guia: o plugin apaga qualquer outra chave e valor fora do formato, e o site recusa. Se o list_orders deu erro, NÃO chame operation_save. Números como número (12500, nunca \"12.500\"). Não invente custo: sem o campo, null. truncated: true se parou antes da última página. Depois chame `operation_status` e copie a `phrase`.",
         inputSchema: {
           type: "object",
           properties: {
@@ -788,10 +802,11 @@ const TOOLS = DEGRADED
             operator:    { type: "string", enum: ["droplatam", "dropi"] },
             window_days: { type: "integer", enum: [1, 7, 15, 30], description: "o MESMO período do retrato de anúncios." },
             orders:      { type: "array", maxItems: 2000, items: { type: "object" } },
+            expected_count: { type: "integer", description: "a soma do `count` que o list_orders devolveu (o total que a Dropi contou). O site recusa se não bater com os pedidos enviados." },
             truncated:   { type: "boolean" },
             read_at:     { type: "string", description: "quando você leu (ISO)." },
           },
-          required: ["project_id", "operator", "window_days", "orders"],
+          required: ["project_id", "operator", "window_days", "orders", "expected_count"],
         },
       },
       {
@@ -1593,14 +1608,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (![1, 7, 15, 30].includes(args.window_days)) return text("window_days tem que ser 1, 7, 15 ou 30.", true);
     if (!Array.isArray(args.orders) || args.orders.length > 2000) return text("orders tem que ser uma lista de até 2.000 pedidos.", true);
     const orders = slimOrders(args.orders);
-    const body = { operator: args.operator, window_days: args.window_days, orders, truncated: args.truncated === true, ...(typeof args.read_at === "string" ? { read_at: args.read_at.slice(0, 40) } : {}) };
+    if (!Number.isInteger(args.expected_count) || args.expected_count < 0) return text("expected_count é obrigatório: a soma do `count` que o list_orders devolveu em cada página.", true);
+    const body = { operator: args.operator, window_days: args.window_days, orders, expected_count: args.expected_count, truncated: args.truncated === true, ...(typeof args.read_at === "string" ? { read_at: args.read_at.slice(0, 40) } : {}) };
     try {
       const res = await api(`/api/stores/${id}/operation/save`, { method: "POST", body, timeoutMs: 30_000 });
-      return text(JSON.stringify({ ok: true, saved_at: res.saved_at ?? null, window_days: res.window_days ?? args.window_days, orders_total: res.orders_total ?? null, costs_missing: res.costs_missing ?? 0 }));
+      return text(JSON.stringify({ ok: true, saved_at: res.saved_at ?? null, window_days: res.window_days ?? args.window_days, orders_total: res.orders_total ?? null, costs_missing: res.costs_missing ?? 0, duplicates: res.duplicates ?? 0, unknown_states: res.unknown_states ?? 0 }));
     } catch (e) {
       if (e instanceof AuthError) return text("Chave do Iron Office inválida: refaça o passo 2 em ironoffice.app/onboarding.", true);
       const why = e.status === 404 ? "loja não encontrada nesta conta (confira o project_id no shop_status)" : redactKeys(String(e.message ?? ""), 300).text;
-      return text(`Não deu pra gravar a operação: ${String(why).replace(/[.\s]+$/, "")}.`, true);
+      // 409 = o total não bateu: nada foi gravado (o retrato anterior continua)
+      return text(`Não deu pra gravar a operação (nada mudou no site): ${String(why).replace(/[.\s]+$/, "")}.`, true);
     }
   }
 
