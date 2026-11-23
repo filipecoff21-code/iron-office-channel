@@ -67,6 +67,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // sobe o servidor MCP; devolve o processo, as linhas que ele escreveu e um send()
 // onda 31a: o único retoque do bloco desde a v0.17.0: o atalho do Spy e os encurtamentos que o fizeram caber
 const DESFAZ_31A = (l) => l
+  // onda 61.3 (0.31.2): o pedido avulso de conferência ("confere a página") entra na rota da página de venda, sem crescer o bloco além de 3900
+  .replace("; página de venda ('quero vender como esta página', 'confere a página'), página pronta", "; página na lógica de uma referência ('quero vender como esta página'), página pronta")
   // onda 57 (0.27.0): o gatilho de criar loja (e o "de vendas" que saiu pra caber no teto)
   .replace("cancelar pedido, nota ou etiqueta de pedido, criar loja → `office-fluxos`", "cancelar pedido, nota ou etiqueta de pedido → `office-fluxos`")
   .replace("; página na lógica de uma referência ('quero vender", "; página de vendas na lógica de uma referência ('quero vender")
@@ -77,7 +79,7 @@ const DESFAZ_31A = (l) => l
   .replace("o `reply` termina com a url. Auditoria", "o `reply` termina com a url devolvida. Auditoria")
   .replace("Ferramenta da Meta ausente nesta sessão", "Ferramenta da Meta que não existe nesta sessão")
   .replace("Só a sessão com `npx", "Só a sessão aberta com `npx");
-const BLOCO_ATUAL = 3899;
+const BLOCO_ATUAL = 3900; // 61.3: 3899 → 3900 (a rota da conferência)
 const VERSAO_ATUAL = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version;
 
 // onda 55c: o teste não herda o que o lançador do ironoffice pôs no ambiente de quem roda
@@ -1729,6 +1731,8 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   console.log(`  (bloco de instruções: ${ins.length} caracteres)`);
   check("43 tamanho: bloco ≤ 3900 e ≥ 3000 (esperado 3881)", ins.length <= 3900 && ins.length >= 3000, `tamanho ${ins.length}`);
   check("43 gatilho: 'minerar', 'produto vencedor' → `minerar` no item 8, e saiu o 'no estilo de…'", ins.includes("'minerar', 'produto vencedor' → `minerar`") && !ins.includes("'no estilo de…'"));
+  // onda 61.3 (0.31.2): pedido avulso "confere a página no celular" não carregava a pagina-de-venda (veredito E.15b, 22/11)
+  check("61.3 gatilho: 'confere a página' na rota da página de venda (→ office-fluxos → pagina-de-venda), e o office-fluxos com 'como fica no celular'", ins.includes("página de venda ('quero vender como esta página', 'confere a página'), página pronta") && /página pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido, criar loja → `office-fluxos`/.test(ins) && SKILL.includes("'confere a página', 'como fica no celular'") && ins.length <= 3900);
   // os outros 12 itens: idênticos byte a byte aos da v0.15.0 (lidos da tag, não de cópia no teste)
   let antigos = null;
   try {
@@ -2675,7 +2679,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.handshake();
   await sleep(1500);
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("58 initialize → versão atual e o bloco de instruções intocado (3899, sem gatilho novo)", init?.serverInfo?.version === VERSAO_ATUAL && (init?.instructions ?? "").length === 3899 && !(init?.instructions ?? "").includes("operation_status"), `${init?.serverInfo?.version} ${(init?.instructions ?? "").length}`);
+  check("58 initialize → versão atual e o bloco de instruções no tamanho atual (BLOCO_ATUAL)", init?.serverInfo?.version === VERSAO_ATUAL && (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("operation_status"), `${init?.serverInfo?.version} ${(init?.instructions ?? "").length}`);
   s.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   call(s, 3, "operation_status", { project_id: OK_ID, days: 15 });
   call(s, 4, "operation_status", { project_id: SEM });
@@ -2827,7 +2831,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções intocado (3899) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.31.1", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.31.2", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }

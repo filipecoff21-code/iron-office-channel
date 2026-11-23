@@ -17,7 +17,7 @@ import { acquireLockFile } from "./lock.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.31.1";
+const VERSION = "0.31.2";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -582,7 +582,7 @@ const INSTRUCTIONS = DEGRADED
       "Resultado longo (relatório, auditoria, spy, copy, plano): `deliver` com título, agente e conteúdo completo ANTES do `reply`; o `reply` termina com a url. Auditoria/Spy: o JSON do bloco `## Cartão` vai em `card`, sem reescrever, e a página auditada em `url`; o `reply` vira 1–2 linhas + url.",
       "Página terminada (lp-cinematico, iron-clone, página da Shopify fora do produto): `page_save` com título, tipo e a URL (no ar) ou a pasta (rascunho). Quem publica é o aluno, nunca você.",
       "Loja: a 1ª linha `[loja: …]` é a loja ativa do aluno; se tem ficha, leia-a antes de responder; se diz `ficha: ainda sem ficha` e o pedido é da loja, ofereça em 1 linha montar a ficha (skill `loja`) e espere o sim. O iron-shopify usa `shop_status` e `shop_query` deste plugin, nunca `curl`. Leituras, `reply` e `deliver` vão pra loja da última mensagem; mutation leva sempre o `project_id` da loja do pedido (o `id:` da linha `[loja: …]`).",
-      "Gatilho → skill, ANTES de agir: `anúncios: atualizar` ou 'como estão meus anúncios' → `anuncios`; imagem ('gera uma imagem', 'variação da imagem <id>', 'sobe/tira essa da Shopify') → `imagens`; `trilha: <etapa>` ou 'continuar a trilha' → `trilha`; 'o que está vendendo em <país>', 'minerar', 'produto vencedor' → `minerar`; página na lógica de uma referência ('quero vender como esta página'), página pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido, criar loja → `office-fluxos`.",
+      "Gatilho → skill, ANTES de agir: `anúncios: atualizar` ou 'como estão meus anúncios' → `anuncios`; imagem ('gera uma imagem', 'variação da imagem <id>', 'sobe/tira essa da Shopify') → `imagens`; `trilha: <etapa>` ou 'continuar a trilha' → `trilha`; 'o que está vendendo em <país>', 'minerar', 'produto vencedor' → `minerar`; página de venda ('quero vender como esta página', 'confere a página'), página pronta, dados que faltam, cancelar pedido, nota ou etiqueta de pedido, criar loja → `office-fluxos`.",
       "Ferramenta da Meta ausente nesta sessão, ou pedido `/mcp`: responda os 3 passos (no terminal: `/mcp` → `meta-ads` → entrar com o Facebook; depois fechar e abrir o `ironoffice`), nunca 'não funciona aqui'.",
       "Pergunta ao aluno é `ask`: UMA por mensagem, com opções (até 6) e `skip`; espere a resposta. Vale pra sim/não, oferta de UMA ação e CAMINHOS ('A ou B', uma opção por caminho): o aluno clica, não digita comando. Um `reply` NUNCA termina com pergunta nem com 'é só responder X', 'escreve X', 'me diga X': se precisa de resposta, a última chamada da rodada é uma `ask`. Dados que faltam, do aluno OU do fornecedor: UM formulário (`ask` com `fields`, até 12); o que ele pular vira 'dado pendente'; nunca 'me manda depois' sem formulário.",
       "LOTE: duas ou mais tags antes de responder = cada uma tem a sua resposta, na ordem; 'Pular' recebe 1 linha. O retorno das ferramentas avisa mensagem sem resposta e passo pendente: não encerre a rodada com aviso em aberto.",

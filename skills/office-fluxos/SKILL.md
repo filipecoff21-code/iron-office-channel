@@ -7,7 +7,7 @@ description: Fluxos do Iron Office que não cabem nas instruções do canal. Car
 
 ## Página de venda (skill `pagina-de-venda`)
 
-Todo pedido de página de venda ou de produto ('cria a página do produto', 'página de venda', 'quero vender como esta página', 'clona essa página', link de página de produto, 'minha página não vende'): carregue a skill `pagina-de-venda` ANTES de agir e siga os passos dela (estudo, botão, esqueleto, formulário antes de montar, tema de rascunho, conferência, gate). Sem pergunta de voz e sem 'reaproveitar frases?'.
+Todo pedido de página de venda ou de produto ('cria a página do produto', 'página de venda', 'quero vender como esta página', 'clona essa página', link de página de produto, 'minha página não vende', 'confere a página', 'como fica no celular'): carregue a skill `pagina-de-venda` ANTES de agir e siga os passos dela (estudo, botão, esqueleto, formulário antes de montar, tema de rascunho, conferência, gate). Sem pergunta de voz e sem 'reaproveitar frases?'.
 Sem essa skill instalada (Iron antigo): diga em 1 linha 'Atualize o Iron: feche e abra o ironoffice.' e siga o fluxo antigo (iron-clone → `clone-persuasion`, seção 'Fim da trilha no Iron Office').
 Projeto sem Shopify: a própria `pagina-de-venda` manda pelo caminho antigo (copy pela `clone-persuasion` + `lp-cinematico`).
 
