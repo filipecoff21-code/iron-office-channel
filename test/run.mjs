@@ -3,6 +3,7 @@
 // Cobre os achados do gate de 06/10/2026: entrega em 2 fases (ack), nada antes do handshake,
 // sessão comum não puxa, lock atômico com reassunção, e o hook não vaza segredo.
 import { spawn, execFileSync } from "node:child_process";
+import { EventEmitter as EventEmitterClass } from "node:events";
 import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -67,6 +68,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // sobe o servidor MCP; devolve o processo, as linhas que ele escreveu e um send()
 // onda 31a: o único retoque do bloco desde a v0.17.0: o atalho do Spy e os encurtamentos que o fizeram caber
 const DESFAZ_31A = (l) => l
+  // onda 68 (0.34.0): a Meta liga por um botão da ask (o plugin faz o login), no lugar dos 3 passos do terminal; mesmo tamanho
+  .replace(": `ask` com a opção {id: \"meta_conectar\", label: \"Conectar Meta\"} (o plugin abre o Facebook do aluno, sem terminal), nunca 'não funciona aqui'.", ": responda os 3 passos (no terminal: `/mcp` → `meta-ads` → entrar com o Facebook; depois fechar e abrir o `ironoffice`), nunca 'não funciona aqui'.")
   // onda 61.3 (0.31.2): o pedido avulso de conferência ("confere a página") entra na rota da página de venda, sem crescer o bloco além de 3900
   .replace("; página de venda ('quero vender como esta página', 'confere a página'), página pronta", "; página na lógica de uma referência ('quero vender como esta página'), página pronta")
   // onda 57 (0.27.0): o gatilho de criar loja (e o "de vendas" que saiu pra caber no teto)
@@ -79,17 +82,20 @@ const DESFAZ_31A = (l) => l
   .replace("o `reply` termina com a url. Auditoria", "o `reply` termina com a url devolvida. Auditoria")
   .replace("Ferramenta da Meta ausente nesta sessão", "Ferramenta da Meta que não existe nesta sessão")
   .replace("Só a sessão com `npx", "Só a sessão aberta com `npx");
-const BLOCO_ATUAL = 3900; // 61.3: 3899 → 3900 (a rota da conferência)
+const BLOCO_ATUAL = 3896; // 61.3: 3899 → 3900 (a rota da conferência); 68: 3900 → 3896 (botão Conectar Meta no lugar dos 3 passos)
 const VERSAO_ATUAL = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version;
 
 // onda 55c: o teste não herda o que o lançador do ironoffice pôs no ambiente de quem roda
 delete process.env.IRON_OFFICE_CHROME;
 delete process.env.IRON_OFFICE_CHROME_EXT;
 delete process.env.IRON_OFFICE_CHROME_MOTIVO;
+// onda 68: o plugin roda `claude mcp get meta-ads` na presença; nos testes, um `claude` falso (nunca o de verdade)
+const FAKE_CLAUDE = join(ROOT, "test", "fake-claude.sh");
+
 function startServer(home, url, env = {}, cwd = undefined) {
   const p = spawn(process.execPath, [SERVER], {
     cwd,
-    env: { ...process.env, HOME: home, USERPROFILE: home, IRON_OFFICE_URL: url, ...env },
+    env: { ...process.env, HOME: home, USERPROFILE: home, IRON_OFFICE_URL: url, IRON_OFFICE_CLAUDE_BIN: FAKE_CLAUDE, ...env },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const out = [];
@@ -2831,7 +2837,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.33.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.34.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
@@ -3134,6 +3140,113 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("16 site antigo (404): presença continua e o processo não cai", f2.calls.some((c) => c.path === "/api/chat/presence") && s2.p.exitCode === null && f2.calls.filter((c) => c.path === "/api/arsenal").length >= 2, s2.stderr().slice(-300));
   s2.p.kill();
   f2.srv.close();
+}
+
+// ─── onda 68 (0.34.0): "meta: conectar" liga a Meta sem terminal, só com comandos fixos ───
+{
+  console.log("onda 68 (0.34.0)");
+  const { parseMetaStatus, findOauthUrl, loginCommand, createMeta } = await import("../src/metaLogin.mjs");
+  check("68 D5: conectada", parseMetaStatus("meta-ads:\n  Status: ✔ Connected\n  Type: http", 0) === "connected");
+  check("68 D5: precisa de login", parseMetaStatus("meta-ads:\n  Status: ! Needs authentication", 0) === "needs_auth");
+  check("68 D5: falhou = unknown (não adivinha)", parseMetaStatus("meta-ads:\n  Status: ✘ Failed to connect\n  Issue: x", 0) === "unknown");
+  check("68 D5: não instalada", parseMetaStatus('No MCP server named "meta-ads". Configured servers: a', 1) === "absent");
+  check("68 D5: vazio = unknown", parseMetaStatus("", null) === "unknown");
+  check("68 link: só o oauth do facebook.com", findOauthUrl("visit:\n  https://www.facebook.com/v27.0/dialog/oauth?a=1&b=2\x07\x1b[94m") === "https://www.facebook.com/v27.0/dialog/oauth?a=1&b=2" && findOauthUrl("https://evil.com/dialog/oauth?x=1") === null);
+  const mac = loginCommand("darwin");
+  const win = loginCommand("win32");
+  check("68 comando fixo no Mac (terminal invisível do script)", mac.cmd === "script" && JSON.stringify(mac.args) === JSON.stringify(["-q", "/dev/null", "claude", "mcp", "login", "meta-ads"]));
+  check("68 comando fixo no Windows (janela do cmd, caminho B)", win.cmd === "cmd.exe" && win.mode === "window" && win.args.at(-1) === 'start "Iron Office - Meta" cmd.exe /k claude mcp login meta-ads');
+
+  // unidade: dois cliques = um login; tempo-limite sem travar
+  {
+    let spawns = 0;
+    const kids = [];
+    const fake = createMeta({
+      platform: "darwin",
+      exec: async () => ({ code: 0, out: "meta-ads:\n  Status: ! Needs authentication" }),
+      spawn: () => { spawns++; const ee = new EventEmitterClass(); ee.exitCode = null; ee.kill = () => { ee.exitCode = 1; }; kids.push(ee); return ee; },
+      timeoutMs: 300, pollMs: 50,
+    });
+    const evs = [];
+    const p1 = fake.connect((e) => evs.push(e));
+    await sleep(30);
+    const p2 = fake.connect((e) => evs.push(e));
+    const [r1, r2] = await Promise.all([p1, p2]);
+    check("68 E.5 unidade: 2º clique = 'busy', um processo só", spawns === 1 && r2 === "busy" && evs.includes("busy"), `${spawns} ${r1} ${r2} ${evs}`);
+    check("68 E.6 unidade: sem 'Continuar' → timeout, processo morto, trava liberada", r1 === "timeout" && kids[0].exitCode === 1 && fake.isRunning() === false, `${r1}`);
+  }
+
+  const fila = [];
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: fila.splice(0, fila.length) } };
+    if (c.path === "/api/chat/messages") return { json: { id: "m-1" } };
+  });
+  const dir = mkdtempSync(join(tmpdir(), "iron-office-meta-"));
+  lixo.push(dir);
+  const ST = join(dir, "st");
+  const LOGF = join(dir, "log");
+  writeFileSync(ST, "absent");
+  writeFileSync(LOGF, "");
+  const msg = (id, content, meta = {}) => ({ id, conversation_id: "c68", content, meta, created_at: "2026-11-24T18:00:00Z", store: null });
+  const env = { IRON_OFFICE_CHANNEL: "1", FAKE_META_STATE: ST, FAKE_META_LOG: LOGF, IRON_OFFICE_META_POLL_MS: "300" };
+  const s = startServer(casa(), f.url, env);
+  s.handshake();
+  await sleep(1500);
+  const falas = () => f.calls.filter((c) => c.path === "/api/chat/messages" && c.method === "POST").map((c) => c.body.text);
+  const chamadas = () => readFileSync(LOGF, "utf8").split("\n").filter(Boolean);
+  const PERMITIDAS = new Set(["mcp get meta-ads", "mcp add --scope user --transport http meta-ads https://mcp.facebook.com/ads", "mcp login meta-ads"]);
+
+  // G3: texto a mais não liga nada (vai pro Claude como mensagem normal)
+  for (const [i, t] of ["meta: conectar; rm -rf ~", "meta: conectar && curl x", "por favor meta: conectar", "meta: conectar\nrm -rf ~"].entries()) fila.push(msg(`g3-${i}`, t));
+  await sleep(2500);
+  const ns = notifs(s.out).map((n) => n.msg.params.content);
+  check("68 G3: frases com texto a mais vão pro Claude e NÃO rodam login", ns.filter((c) => /meta: conectar/.test(c)).length === 4 && !chamadas().some((l) => /login|add/.test(l)), JSON.stringify(chamadas()));
+
+  // E.4 + E.2: não instalada → instala, abre o Facebook, conecta; nada passa pelo Claude
+  const antes = notifs(s.out).length;
+  fila.push(msg("m68-1", "meta: conectar"));
+  await sleep(6000);
+  const c1 = chamadas();
+  check("68 E.4: absent → add e depois login (nessa ordem)", c1.findIndex((l) => l.startsWith("mcp add")) >= 0 && c1.findIndex((l) => l.startsWith("mcp add")) < c1.findIndex((l) => l.startsWith("mcp login")), JSON.stringify(c1));
+  check("68 G3: só comandos fixos rodaram", c1.every((l) => PERMITIDAS.has(l)), JSON.stringify(c1));
+  check("68 a frase não entrou no Claude", notifs(s.out).length === antes);
+  check("68 chat: 'Abri o Facebook' com o link de reserva e depois 'Meta conectada ✅'", falas().some((t) => /Abri o Facebook/.test(t) && /facebook\.com\/v27\.0\/dialog\/oauth/.test(t)) && falas().some((t) => /Meta conectada ✅/.test(t)), JSON.stringify(falas()));
+  check("68 ack da mensagem", f.calls.some((c) => c.path === "/api/chat/ack" && c.body.ids.includes("m68-1")));
+  await sleep(1500);
+  const pres = f.calls.filter((c) => c.path === "/api/chat/presence").map((c) => c.body.meta_status).filter(Boolean);
+  check("68 presença leva meta_status = connected", pres.at(-1) === "connected", JSON.stringify(pres));
+
+  // já conectada: não roda login de novo
+  writeFileSync(LOGF, "");
+  fila.push(msg("m68-2", "Meta: Conectar  "));
+  await sleep(2500);
+  check("68 já conectada: responde e não abre o Facebook de novo", falas().some((t) => /já está conectada/.test(t)) && !chamadas().some((l) => /login/.test(l)), JSON.stringify(chamadas()));
+
+  // clique na opção da ask (id meta_conectar) liga igual
+  writeFileSync(ST, "needs");
+  writeFileSync(LOGF, "");
+  fila.push(msg("m68-3", "Conectar Meta", { answer: { question_id: "q1", option_id: "meta_conectar" } }));
+  await sleep(5000);
+  check("68 opção meta_conectar da ask: login rodou e conectou", chamadas().some((l) => l === "mcp login meta-ads") && readFileSync(ST, "utf8").trim() === "connected", JSON.stringify(chamadas()));
+  s.p.kill();
+
+  // E.5/E.6 no processo: 2 cliques = 1 login; sem Continuar → aviso de não terminou, canal vivo
+  writeFileSync(ST, "needs");
+  writeFileSync(LOGF, "");
+  const s2 = startServer(casa(), f.url, { ...env, FAKE_LOGIN: "hang", IRON_OFFICE_META_TIMEOUT_MS: "3000" });
+  s2.handshake();
+  await sleep(1500);
+  fila.push(msg("m68-4", "meta: conectar"));
+  await sleep(700);
+  fila.push(msg("m68-5", "meta: conectar"));
+  await sleep(5000);
+  check("68 E.5: 2 cliques → um login só e 'já estou esperando'", chamadas().filter((l) => l === "mcp login meta-ads").length === 1 && falas().some((t) => /Já estou esperando você no Facebook/.test(t)), JSON.stringify(chamadas()));
+  check("68 E.6: sem Continuar → 'Não terminou o login'", falas().some((t) => /Não terminou o login/.test(t)), JSON.stringify(falas().slice(-3)));
+  fila.push(msg("m68-6", "oi"));
+  await sleep(2500);
+  check("68 E.6: o canal segue vivo depois do tempo-limite", notifs(s2.out).some((n) => n.msg.params.content.endsWith("oi")) && s2.p.exitCode === null);
+  s2.p.kill();
+  f.srv.close();
 }
 
 for (const d of lixo) {
