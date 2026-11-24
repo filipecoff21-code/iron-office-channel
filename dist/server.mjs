@@ -7173,8 +7173,8 @@ var require_dist = __commonJS({
         return ajv;
       }
       const [formats, exportName] = opts.mode === "fast" ? [formats_1.fastFormats, fastName] : [formats_1.fullFormats, fullName];
-      const list = opts.formats || formats_1.formatNames;
-      addFormats(ajv, list, formats, exportName);
+      const list2 = opts.formats || formats_1.formatNames;
+      addFormats(ajv, list2, formats, exportName);
       if (opts.keywords)
         (0, limit_1.default)(ajv);
       return ajv;
@@ -7186,11 +7186,11 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs, exportName) {
+    function addFormats(ajv, list2, fs, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
-      for (const f of list)
+      for (const f of list2)
         ajv.addFormat(f, fs[f]);
     }
     module.exports = exports = formatsPlugin;
@@ -12062,8 +12062,8 @@ var contributors = {
 function aggregateChecks(schema) {
   const agg = {};
   const def = schema._zod.def;
-  const list = schema._zod.traits.has("$ZodCheck") ? [schema, ...def.checks ?? []] : def.checks ?? [];
-  for (const ch of list)
+  const list2 = schema._zod.traits.has("$ZodCheck") ? [schema, ...def.checks ?? []] : def.checks ?? [];
+  for (const ch of list2)
     contributors[ch._zod.def.check]?.(agg, ch._zod.def);
   const bag = schema._zod.bag;
   if (bag.minimum !== void 0)
@@ -16947,11 +16947,11 @@ var StdioServerTransport = class {
 };
 
 // src/server.mjs
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync2, mkdirSync, unlinkSync as unlinkSync2, existsSync as existsSync2 } from "node:fs";
-import { createHash as createHash2 } from "node:crypto";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync2, mkdirSync, unlinkSync as unlinkSync2, existsSync as existsSync3 } from "node:fs";
+import { createHash as createHash3 } from "node:crypto";
 import { homedir as homedir3 } from "node:os";
 import { execFile, spawn } from "node:child_process";
-import { dirname as dirname2, join as join4 } from "node:path";
+import { dirname as dirname2, join as join5 } from "node:path";
 
 // src/primeira.mjs
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -17115,14 +17115,85 @@ async function acquireLockFile({ path, pid, holderAlive: holderAlive2, log: log2
   return false;
 }
 
+// src/arsenal.mjs
+import { readFileSync as readFileSync4, readdirSync as readdirSync2, existsSync as existsSync2, statSync as statSync2 } from "node:fs";
+import { createHash } from "node:crypto";
+import { join as join3 } from "node:path";
+var ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+function list(dir) {
+  try {
+    return { ok: true, items: readdirSync2(dir, { withFileTypes: true }) };
+  } catch (e) {
+    return { ok: e?.code === "ENOENT", items: [] };
+  }
+}
+function isFileAt(p) {
+  try {
+    return statSync2(p).isFile();
+  } catch {
+    return false;
+  }
+}
+function readManifest(ironDir) {
+  try {
+    const m = JSON.parse(readFileSync4(join3(ironDir, "manifest.json"), "utf8"));
+    return m && typeof m === "object" ? m : null;
+  } catch {
+    return null;
+  }
+}
+function arsenalSnapshot(home) {
+  const claude = join3(home, ".claude");
+  const ironDir = join3(home, ".iron");
+  let partial2 = false;
+  const man = readManifest(ironDir);
+  if (!man) partial2 = true;
+  const knownAgents = new Set((Array.isArray(man?.agents_top) ? man.agents_top : []).map((a) => a?.id).filter((id) => typeof id === "string"));
+  const knownSkills = new Set((Array.isArray(man?.skills) ? man.skills : []).map((s) => s?.id).filter((id) => typeof id === "string"));
+  const knownSquads = new Set(man?.squads && typeof man.squads === "object" ? Object.keys(man.squads) : []);
+  const ag = list(join3(claude, "agents"));
+  if (!ag.ok) partial2 = true;
+  const agentIds = ag.items.filter((e) => e.name.endsWith(".md") && (e.isFile() || e.isSymbolicLink() && isFileAt(join3(claude, "agents", e.name)))).map((e) => e.name.slice(0, -3));
+  const sk = list(join3(claude, "skills"));
+  if (!sk.ok) partial2 = true;
+  const skillIds = sk.items.filter((e) => (e.isDirectory() || e.isSymbolicLink()) && existsSync2(join3(claude, "skills", e.name, "SKILL.md"))).map((e) => e.name);
+  const ir = list(ironDir);
+  if (!ir.ok) partial2 = true;
+  let specialists = 0;
+  const bySquad = {};
+  for (const e of ir.items) {
+    if (!(e.isDirectory() || e.isSymbolicLink()) || !e.name.startsWith("squad-")) continue;
+    const sa = list(join3(ironDir, e.name, "agents"));
+    if (!sa.ok) partial2 = true;
+    const n = sa.items.filter((x) => x.name.endsWith(".md") && (x.isFile() || x.isSymbolicLink() && isFileAt(join3(ironDir, e.name, "agents", x.name)))).length;
+    specialists += n;
+    if (knownSquads.has(e.name)) bySquad[e.name] = n;
+  }
+  const ironIds = [.../* @__PURE__ */ new Set([...agentIds.filter((id) => knownAgents.has(id)), ...skillIds.filter((id) => knownSkills.has(id))])].filter((id) => ID_RE.test(id)).sort();
+  const deps = man?.departments && typeof man.departments === "object" ? man.departments : null;
+  const body = {
+    agents: agentIds.length,
+    specialists,
+    skills: skillIds.length,
+    squads: Object.keys(bySquad).length,
+    iron_ids: ironIds,
+    by_squad: Object.fromEntries(Object.entries(bySquad).sort(([a], [b]) => a.localeCompare(b))),
+    ...deps ? { departments: deps } : {},
+    pkg_version: typeof man?.version === "string" ? man.version.slice(0, 20) : null,
+    partial: partial2
+  };
+  const hash = createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 16);
+  return { ...body, hash };
+}
+
 // src/server.mjs
 import { fileURLToPath } from "node:url";
 
 // hooks/shared.mjs
-import { readFileSync as readFileSync4 } from "node:fs";
-import { createHash } from "node:crypto";
+import { readFileSync as readFileSync5 } from "node:fs";
+import { createHash as createHash2 } from "node:crypto";
 import { homedir as homedir2 } from "node:os";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 var SECRET_PATTERNS = [
   /iok_[A-Za-z0-9]+/g,
   // chave do próprio Iron Office
@@ -17187,7 +17258,7 @@ function redactKeys(s, max) {
 function feedOn(home = homedir2()) {
   let txt;
   try {
-    txt = readFileSync4(join3(home, ".iron", "config.yaml"), "utf8").replace(/^\uFEFF/, "");
+    txt = readFileSync5(join4(home, ".iron", "config.yaml"), "utf8").replace(/^\uFEFF/, "");
   } catch {
     return true;
   }
@@ -17195,7 +17266,7 @@ function feedOn(home = homedir2()) {
   if (!all.length) return true;
   return !["off", "false", "no", "0"].includes(all[all.length - 1][1].toLowerCase());
 }
-var porteiroHash = (item) => createHash("sha1").update(String(item)).digest("hex").slice(0, 12);
+var porteiroHash = (item) => createHash2("sha1").update(String(item)).digest("hex").slice(0, 12);
 var PORTEIRO_ID_RE = /^pt-(estudar|instalar|nao)-([a-f0-9]{12})$/;
 var PORTEIRO_ROTULOS = { estudar: "Estudar antes (recomendado)", instalar: "Instalar mesmo assim", nao: "N\xE3o instalar" };
 var TIPOS_BASE = [
@@ -17218,7 +17289,7 @@ var PORTEIRO_TIPOS = TIPOS_BASE.flatMap((t) => [t, t + PORTEIRO_SEM_NOME]);
 function cortadoRegistrado(home, hash, curto) {
   let linhas;
   try {
-    linhas = readFileSync4(join3(home, ".iron", "porteiro", "registro.jsonl"), "utf8").split("\n").slice(-300);
+    linhas = readFileSync5(join4(home, ".iron", "porteiro", "registro.jsonl"), "utf8").split("\n").slice(-300);
   } catch {
     return false;
   }
@@ -17258,12 +17329,12 @@ function porteiroAskCheck(text2, options, { home = homedir2() } = {}) {
 }
 
 // src/server.mjs
-var VERSION = "0.32.0";
+var VERSION = "0.33.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
-var KEY_PATH = join4(homedir3(), ".claude", "iron-office-api-key");
-var LOCK_DIR = join4(homedir3(), ".iron");
-var LOCK_PATH = join4(LOCK_DIR, "office.lock");
+var KEY_PATH = join5(homedir3(), ".claude", "iron-office-api-key");
+var LOCK_DIR = join5(homedir3(), ".iron");
+var LOCK_PATH = join5(LOCK_DIR, "office.lock");
 var DEFAULT_CONVERSATION = "00000000-0000-0000-0000-000000000001";
 var FAST_MS = 2e3;
 var SLOW_MS = 15e3;
@@ -17284,7 +17355,7 @@ function log(msg) {
 }
 function readKey() {
   try {
-    const buf = readFileSync5(KEY_PATH);
+    const buf = readFileSync6(KEY_PATH);
     const utf16 = buf.length >= 2 && buf[0] === 255 && buf[1] === 254;
     return buf.toString(utf16 ? "utf16le" : "utf8").replace(/[﻿\u0000]/g, "").trim();
   } catch {
@@ -17365,7 +17436,7 @@ async function acquireLock() {
 }
 function releaseLock() {
   try {
-    if (readFileSync5(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync2(LOCK_PATH);
+    if (readFileSync6(LOCK_PATH, "utf8").trim() === String(process.pid)) unlinkSync2(LOCK_PATH);
   } catch {
   }
 }
@@ -17401,8 +17472,8 @@ var SLIM_KEYS = ["status", "total", "supplier_cost", "shipping", "created_at", "
 var STATUS_OK = /^[\p{L}_ ()\-.,]{1,60}$/u;
 var DATE_OK = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
 var num = (v) => v === null || typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : void 0;
-function slimOrders(list) {
-  return list.map((o) => {
+function slimOrders(list2) {
+  return list2.map((o) => {
     const out = {};
     if (!o || typeof o !== "object" || Array.isArray(o)) return out;
     if (typeof o.status === "string" && STATUS_OK.test(o.status.trim())) out.status = o.status.trim();
@@ -17415,7 +17486,7 @@ function slimOrders(list) {
     if (typeof o.currency === "string" && /^[A-Z]{3}$/.test(o.currency)) out.currency = o.currency;
     const id = o.id ?? o.order_id;
     if (typeof id === "string" && id.trim() || typeof id === "number" && Number.isFinite(id)) {
-      out.key = createHash2("sha256").update(String(id).trim()).digest("hex").slice(0, 16);
+      out.key = createHash3("sha256").update(String(id).trim()).digest("hex").slice(0, 16);
     }
     return out;
   });
@@ -18206,10 +18277,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (args.images !== void 0) {
       if (args.fields !== void 0) return text("images n\xE3o vai no formul\xE1rio: mande numa ask sem fields.", true);
       if (!Array.isArray(args.images) || args.images.length === 0 || args.images.length > Q_IMAGES_MAX) return text(`images: de 1 a ${Q_IMAGES_MAX} ids de imagem.`, true);
-      const list = args.images.map((x) => typeof x === "string" ? x.trim().toLowerCase() : "");
-      if (list.some((x) => !UUID_RE2.test(x))) return text("images: cada item \xE9 o id COMPLETO (UUID) da imagem, o que o image_generate devolveu. Link ou id curto n\xE3o vale.", true);
-      if (new Set(list).size !== list.length) return text("images: id repetido.", true);
-      images = list;
+      const list2 = args.images.map((x) => typeof x === "string" ? x.trim().toLowerCase() : "");
+      if (list2.some((x) => !UUID_RE2.test(x))) return text("images: cada item \xE9 o id COMPLETO (UUID) da imagem, o que o image_generate devolveu. Link ou id curto n\xE3o vale.", true);
+      if (new Set(list2).size !== list2.length) return text("images: id repetido.", true);
+      images = list2;
     }
     if (args.fields !== void 0) {
       if (raw.length > 0) return text("Formul\xE1rio (fields) e op\xE7\xF5es (options) n\xE3o v\xE3o juntos: mande um ou outro.", true);
@@ -18628,7 +18699,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const { dir, file } = originalPath({ store, imageId, kind: isSvg || kind === "alpha" ? kind : png ? "original-png" : "original" });
       mkdirSync(dir, { recursive: true });
       writeFileSync2(file, buf);
-      const sha256 = createHash2("sha256").update(buf).digest("hex");
+      const sha256 = createHash3("sha256").update(buf).digest("hex");
       let antiga = null;
       try {
         antiga = pastaAntiga({ store, outras: lista.filter((x) => x?.project_id !== id) });
@@ -18732,11 +18803,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text(out);
     } catch (e) {
       if (e.status === 409 && Array.isArray(e.data?.stores)) {
-        const list = e.data.stores.map((x) => `${redactKeys(String(x.name ?? ""), 80).text} (project_id ${x.project_id})`).join(", ");
+        const list2 = e.data.stores.map((x) => `${redactKeys(String(x.name ?? ""), 80).text} (project_id ${x.project_id})`).join(", ");
         if (/^Ação de pedido/.test(String(e.data.error ?? ""))) {
-          return text(list ? `A\xE7\xE3o de pedido precisa da loja: passe o project_id: ${list}.` : "A\xE7\xE3o de pedido precisa da loja, e nenhuma loja tem a Shopify conectada: pe\xE7a pro aluno conectar em ironoffice.app/integrations.", true);
+          return text(list2 ? `A\xE7\xE3o de pedido precisa da loja: passe o project_id: ${list2}.` : "A\xE7\xE3o de pedido precisa da loja, e nenhuma loja tem a Shopify conectada: pe\xE7a pro aluno conectar em ironoffice.app/integrations.", true);
         }
-        return text(`Mais de uma loja conectada: diga qual loja (passe project_id): ${list}.`, true);
+        return text(`Mais de uma loja conectada: diga qual loja (passe project_id): ${list2}.`, true);
       }
       return text(`Falhou a consulta na loja: ${e.message}`, true);
     }
@@ -18765,12 +18836,12 @@ function porteiroResposta(meta2) {
   const [, acao, hash] = m;
   if (acao === "instalar") {
     try {
-      const dir = join4(homedir3(), ".iron", "porteiro");
+      const dir = join5(homedir3(), ".iron", "porteiro");
       mkdirSync(dir, { recursive: true, mode: 448 });
-      const file = join4(dir, "liberados.json");
+      const file = join5(dir, "liberados.json");
       let arr = [];
       try {
-        const old = JSON.parse(readFileSync5(file, "utf8"));
+        const old = JSON.parse(readFileSync6(file, "utf8"));
         if (Array.isArray(old)) arr = old;
       } catch {
       }
@@ -18903,7 +18974,7 @@ function strList(v) {
 function readJson(path) {
   let text2;
   try {
-    text2 = readFileSync5(path, "utf8");
+    text2 = readFileSync6(path, "utf8");
   } catch {
     return null;
   }
@@ -18914,13 +18985,13 @@ function readJson(path) {
   }
 }
 function mcpServerNames(home = homedir3(), cwd = process.cwd(), env = process.env) {
-  const user = readJson(join4(home, ".claude.json"));
+  const user = readJson(join5(home, ".claude.json"));
   if (user === void 0) return null;
   const proj = user?.projects && typeof user.projects === "object" ? user.projects[cwd] : null;
   const p = proj && typeof proj === "object" ? proj : {};
   const offJson = new Set(strList(p.disabledMcpjsonServers));
   const onJson = new Set(strList(p.enabledMcpjsonServers));
-  const mcpJson = readJson(join4(cwd, ".mcp.json"));
+  const mcpJson = readJson(join5(cwd, ".mcp.json"));
   if (mcpJson === void 0) return null;
   const fromJson = mcpKeys(mcpJson).filter((n) => !offJson.has(n) && (p.enableAllProjectMcpServers === true || onJson.has(n)));
   const off = new Set(strList(p.disabledMcpServers));
@@ -18947,10 +19018,31 @@ async function presencePost() {
     if (!(e instanceof AuthError)) log(`presen\xE7a falhou: ${e.message}`);
   }
 }
+var ARSENAL_MS = Math.max(1e3, Number(process.env.IRON_OFFICE_ARSENAL_MS) || 10 * 6e4);
+var arsenalSent = null;
+async function arsenalOnce() {
+  if (stopped || Date.now() < state.authPausedUntil) return;
+  let snap;
+  try {
+    snap = arsenalSnapshot(homedir3());
+  } catch (e) {
+    log(`arsenal: leitura falhou: ${e.message}`);
+    return;
+  }
+  if (snap.hash === arsenalSent) return;
+  try {
+    await api("/api/arsenal", { method: "POST", body: snap });
+    arsenalSent = snap.hash;
+  } catch (e) {
+    if (!(e instanceof AuthError)) log(`arsenal falhou: ${e.message}`);
+  }
+}
 function becomeActive() {
   mode = "active";
   log(`ativo em ${BASE}`);
   presenceOnce();
+  arsenalOnce();
+  setInterval(arsenalOnce, ARSENAL_MS).unref();
   presenceTimer = setInterval(() => {
     if (Date.now() >= state.authPausedUntil) presenceOnce();
   }, PRESENCE_MS);
@@ -19007,12 +19099,12 @@ async function maybeStart() {
   }, RETAKE_MS);
   retake.unref();
 }
-var BYE_SCRIPT = join4(dirname2(fileURLToPath(import.meta.url)), "bye.mjs");
+var BYE_SCRIPT = join5(dirname2(fileURLToPath(import.meta.url)), "bye.mjs");
 async function byeOnce() {
   if (mode !== "active" || !API_KEY) return;
   if (presenceTimer) clearInterval(presenceTimer);
   const waitMs = presenceInFlight ? 400 : 0;
-  if (existsSync2(BYE_SCRIPT)) {
+  if (existsSync3(BYE_SCRIPT)) {
     try {
       const child = spawn(process.execPath, [BYE_SCRIPT, BASE, SESSION_ID, String(waitMs)], { detached: true, stdio: "ignore", windowsHide: true });
       child.on("error", (e) => log(`despedida n\xE3o saiu: ${e.message}`));

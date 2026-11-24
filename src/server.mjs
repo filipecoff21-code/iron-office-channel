@@ -14,10 +14,11 @@ import { dirname, join } from "node:path";
 import { estadoPrimeira } from "./primeira.mjs";
 import { originalPath, pastaAntiga, pastaLoja } from "./originais.mjs";
 import { acquireLockFile } from "./lock.mjs";
+import { arsenalSnapshot } from "./arsenal.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.32.0";
+const VERSION = "0.33.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -1940,10 +1941,35 @@ async function presencePost() {
   }
 }
 
+// 0.33.0 (onda 16): "Seu Iron" no site. Só números + ids do Iron (src/arsenal.mjs); vale com o feed desligado, porque
+// não leva pasta, nome de arquivo do aluno nem conteúdo. Sai no início e a cada 10 min, e só quando o hash mudou.
+// Site antigo (404) ou rede fora: tenta de novo no próximo ciclo; nunca derruba a presença.
+const ARSENAL_MS = Math.max(1000, Number(process.env.IRON_OFFICE_ARSENAL_MS) || 10 * 60_000);
+let arsenalSent = null;
+async function arsenalOnce() {
+  if (stopped || Date.now() < state.authPausedUntil) return;
+  let snap;
+  try {
+    snap = arsenalSnapshot(homedir());
+  } catch (e) {
+    log(`arsenal: leitura falhou: ${e.message}`);
+    return;
+  }
+  if (snap.hash === arsenalSent) return;
+  try {
+    await api("/api/arsenal", { method: "POST", body: snap });
+    arsenalSent = snap.hash;
+  } catch (e) {
+    if (!(e instanceof AuthError)) log(`arsenal falhou: ${e.message}`);
+  }
+}
+
 function becomeActive() {
   mode = "active";
   log(`ativo em ${BASE}`);
   presenceOnce();
+  arsenalOnce();
+  setInterval(arsenalOnce, ARSENAL_MS).unref();
   presenceTimer = setInterval(() => {
     if (Date.now() >= state.authPausedUntil) presenceOnce();
   }, PRESENCE_MS);

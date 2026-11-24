@@ -4,7 +4,7 @@
 // sessão comum não puxa, lock atômico com reassunção, e o hook não vaza segredo.
 import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2831,7 +2831,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.32.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.33.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
@@ -3050,7 +3050,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.handshake();
   await sleep(1500);
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("65 bloco de instruções intocado (BLOCO_ATUAL) e versão 0.32.0", (init?.instructions ?? "").length === BLOCO_ATUAL && init?.serverInfo?.version === "0.32.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("65 bloco de instruções intocado (BLOCO_ATUAL) e versão atual", (init?.instructions ?? "").length === BLOCO_ATUAL && init?.serverInfo?.version === VERSAO_ATUAL, `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   const ped = (x = {}) => ({ status: "ENTREGADO", total: 100000, supplier_cost: 40000, shipping: 15000, created_at: "2026-11-23 10:00", currency: "COP", ...x });
   call(s, 3, "operation_save", { project_id: LOJA, operator: "droplatam", window_days: 7, expected_count: 2, orders: [ped({ nombre: "Fulano de Tal", telefono: "3001234567", direccion: "Calle 1", id: 93204655, guia: "G123" }), ped({ status: "CANCELADO", email: "x@y.com" })] });
@@ -3076,6 +3076,64 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("65 ask aceita link droplatam (o site desenha o modal de países)", result(s, 7)?.isError !== true && !!askHit, txt(s, 7));
   s.p.kill();
   f.srv.close();
+}
+
+// ─── onda 16 (0.33.0): "Seu Iron" — só números + ids do Iron; nome próprio do aluno nunca sai ───
+{
+  console.log("onda 16 (0.33.0)");
+  const { arsenalSnapshot } = await import("../src/arsenal.mjs");
+  const arvore = () => {
+    const h = casa();
+    const w = (rel, txt = "x") => { mkdirSync(dirname(join(h, rel)), { recursive: true }); writeFileSync(join(h, rel), txt); };
+    for (const a of ["iron-copy", "iron-spy", "meu-cliente-secreto"]) w(`.claude/agents/${a}.md`);
+    w(".claude/agents/nota.txt");
+    symlinkSync(join(h, "nao-existe.md"), join(h, ".claude", "agents", "quebrado.md")); // gate r1: link quebrado não conta
+    for (const sk of ["anuncios", "skill-da-padaria-joana"]) w(`.claude/skills/${sk}/SKILL.md`);
+    mkdirSync(join(h, ".claude", "skills", "pasta-sem-skill"), { recursive: true });
+    for (const n of ["copy-orqx", "copy-a", "copy-b"]) w(`.iron/squad-copy/agents/${n}.md`);
+    w(".iron/squad-do-cliente-x/agents/um.md");
+    w(".iron/manifest.json", JSON.stringify({ version: "2.42.0", agents_top: [{ id: "iron-copy" }, { id: "iron-spy" }], skills: [{ id: "anuncios" }], squads: { "squad-copy": {} }, departments: { departments: [{ id: "copy", name: "Copy e Conteúdo", order: 5 }], problems: [], agents: { "iron-copy": { department: "copy", squad: "squad-copy", specialists: 36, examples: ["a", "b"], problems: [] } } } }));
+    return h;
+  };
+  const h = arvore();
+  const a = arsenalSnapshot(h);
+  const txtA = JSON.stringify(a);
+  check("16 conta certo na árvore falsa (3 agentes, 4 especialistas, 2 skills; .txt e pasta sem SKILL.md fora)", a.agents === 3 && a.specialists === 4 && a.skills === 2 && a.squads === 1 && a.by_squad["squad-copy"] === 3 && a.partial === false && a.pkg_version === "2.42.0", txtA);
+  check("16 G3 privacidade: agente, skill e squad próprios só no número, nunca com o nome", !/meu-cliente-secreto|padaria|squad-do-cliente/.test(txtA) && JSON.stringify(a.iron_ids) === '["anuncios","iron-copy","iron-spy"]', txtA);
+  check("16 departamentos do pacote instalado vão junto", a.departments?.agents?.["iron-copy"]?.department === "copy", txtA);
+  let semIron, erro = null;
+  try { semIron = arsenalSnapshot(casa()); } catch (e) { erro = e; }
+  check("16 ~/.iron ausente → partial: true, sem exceção, sem departamentos", !erro && semIron.partial === true && semIron.specialists === 0 && semIron.departments === undefined && /^[0-9a-f]{16}$/.test(semIron.hash), String(erro ?? JSON.stringify(semIron)));
+  check("16 hash estável (mesma árvore = mesmo hash)", arsenalSnapshot(h).hash === a.hash);
+
+  const f = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/arsenal") return { json: { ok: true } };
+  });
+  const s = startServer(h, f.url, { IRON_OFFICE_CHANNEL: "1", IRON_OFFICE_ARSENAL_MS: "1000" });
+  s.handshake();
+  await sleep(3500);
+  const posts = () => f.calls.filter((c) => c.path === "/api/arsenal");
+  const p1 = posts();
+  check("16 posta no início e NÃO reposta com o hash igual (3 ciclos de 1 s)", p1.length === 1 && p1[0].method === "POST" && p1[0].key === KEY && p1[0].body.agents === 3, `${p1.length} ${JSON.stringify(p1[0]?.body ?? {}).slice(0, 200)}`);
+  check("16 G3 no fio: o nome próprio não sai pela rede", !f.calls.some((c) => /meu-cliente-secreto|padaria|squad-do-cliente/.test(JSON.stringify(c.body ?? {}))));
+  writeFileSync(join(h, ".claude", "agents", "iron-novo.md"), "x");
+  await sleep(1800);
+  check("16 mudou o arsenal → posta de novo (4 agentes)", posts().length === 2 && posts()[1].body.agents === 4, String(posts().length));
+  s.p.kill();
+  f.srv.close();
+
+  // site antigo (404 na rota): presença segue, sem exceção no processo
+  const f2 = await fakeOffice((c) => {
+    if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    if (c.path === "/api/arsenal") return { status: 404, json: { error: "não existe" } };
+  });
+  const s2 = startServer(arvore(), f2.url, { IRON_OFFICE_CHANNEL: "1", IRON_OFFICE_ARSENAL_MS: "1000" });
+  s2.handshake();
+  await sleep(2500);
+  check("16 site antigo (404): presença continua e o processo não cai", f2.calls.some((c) => c.path === "/api/chat/presence") && s2.p.exitCode === null && f2.calls.filter((c) => c.path === "/api/arsenal").length >= 2, s2.stderr().slice(-300));
+  s2.p.kill();
+  f2.srv.close();
 }
 
 for (const d of lixo) {
