@@ -121,6 +121,7 @@ export function createMeta(deps = {}) {
         let done = false;
         let buf = "";
         let sentLink = false;
+        let exited = false; // gate r2: processo já saiu (a 2ª leitura do get no exit 0 não pode deixar o "abri" escapar)
         const finish = (r) => {
           if (done) return;
           done = true;
@@ -134,7 +135,7 @@ export function createMeta(deps = {}) {
         // gate r1: "abri o Facebook" só se o processo seguiu vivo 1,5 s (claude ausente ou sem o `login` sai antes)
         // e nunca depois do fim; o link chega junto se já tiver aparecido na saída
         const opened = setTimeout(() => {
-          if (done || sentLink || mode === "window") return;
+          if (done || exited || sentLink || mode === "window") return;
           sentLink = true;
           on("opened", findOauthUrl(buf));
         }, 1500);
@@ -154,6 +155,7 @@ export function createMeta(deps = {}) {
         child.stderr?.on("data", onData);
         child.on("error", () => finish("failed"));
         child.on("exit", async (code) => {
+          exited = true;
           if (mode === "window" || done) return; // o `start` sai na hora (quem decide é o poll); depois do fim, nada
           let st2 = await status({ fresh: true });
           // gate r1: login saiu com 0 e o `get` ainda não viu: o token pode gravar com atraso; uma 2ª leitura

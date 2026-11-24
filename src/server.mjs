@@ -529,7 +529,8 @@ async function metaSay(chatId, texto) {
 }
 // gate r1: pedido de conectar com mais de 10 min (Iron estava fechado) não abre o Facebook do nada
 const META_PEDIDO_MAX_MS = 10 * 60_000;
-function metaPedidoVelho(createdAt, now = Date.now()) {
+// o created_at é do relógio do site: compara com a hora do site (relógio local corrigido pelo cabeçalho Date)
+function metaPedidoVelho(createdAt, now = Date.now() + serverSkewMs) {
   const t = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
   return !Number.isNaN(t) && now - t > META_PEDIDO_MAX_MS;
 }
@@ -619,6 +620,7 @@ const REPLY_MAX = 20_000; // 0.5.0: o chat do site aceita até 20 mil
 const DELIVER_MAX = 50_000; // 0.5.0: entrega acima disso vai cortada (antes o site aceitava 200 mil)
 const SHOP_MAX = 60_000; // resposta do shop_query acima disso vai cortada (contexto do modelo)
 
+let serverSkewMs = 0;
 async function api(path, { method = "GET", body, timeoutMs = 15_000 } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -629,6 +631,9 @@ async function api(path, { method = "GET", body, timeoutMs = 15_000 } = {}) {
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     });
+    // 0.34.0 gate r2: diferença entre o relógio deste computador e o do site (cabeçalho Date), pra medir idade de pedido
+    const dh = Date.parse(res.headers.get("date") ?? "");
+    if (!Number.isNaN(dh)) serverSkewMs = dh - Date.now();
     if (res.status === 401) throw new AuthError("chave inválida");
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {

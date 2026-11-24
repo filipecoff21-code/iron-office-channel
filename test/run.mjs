@@ -3280,6 +3280,19 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("68 gate r1: pedido de 11 min atrás → não roda login e avisa que é antigo", !chamadas().some((l) => /login/.test(l)) && falas().some((t) => /já é antigo/.test(t)), JSON.stringify(chamadas()));
   sv.p.kill();
 
+  // gate r2: relógio do aluno 15 min adiantado (o site manda a hora certa no cabeçalho Date): pedido de agora NÃO é velho
+  writeFileSync(LOGF, "");
+  const skewHome = casa();
+  const fakeTime = join(skewHome, "adianta.mjs");
+  writeFileSync(fakeTime, "const r = Date.now; Date.now = () => r() + 15 * 60_000;\n");
+  const sk = startServer(skewHome, f.url, { ...env, NODE_OPTIONS: `--import=${fakeTime}` });
+  sk.handshake();
+  await sleep(1500);
+  fila.push({ ...msg("m68-skew", "meta: conectar"), created_at: new Date().toISOString() });
+  await sleep(2500);
+  check("68 gate r2: relógio local 15 min adiantado → pedido de agora não vira 'antigo'", !falas().some((t, i, a) => i === a.length - 1 && /já é antigo/.test(t)) && chamadas().some((l) => l.startsWith("mcp get")), JSON.stringify({ f: falas().slice(-2), c: chamadas() }));
+  sk.p.kill();
+
   // gate r1: --sem-feed não roda o get nem manda meta_status
   writeFileSync(ST, "connected");
   writeFileSync(LOGF, "");

@@ -17279,6 +17279,7 @@ function createMeta(deps = {}) {
         let done = false;
         let buf = "";
         let sentLink = false;
+        let exited = false;
         const finish = (r) => {
           if (done) return;
           done = true;
@@ -17293,7 +17294,7 @@ function createMeta(deps = {}) {
         };
         const timer = setTimeout(() => finish("timeout"), timeoutMs);
         const opened = setTimeout(() => {
-          if (done || sentLink || mode2 === "window") return;
+          if (done || exited || sentLink || mode2 === "window") return;
           sentLink = true;
           on("opened", findOauthUrl(buf));
         }, 1500);
@@ -17318,6 +17319,7 @@ function createMeta(deps = {}) {
         child.stderr?.on("data", onData);
         child.on("error", () => finish("failed"));
         child.on("exit", async (code) => {
+          exited = true;
           if (mode2 === "window" || done) return;
           let st2 = await status({ fresh: true });
           if (st2 !== "connected" && code === 0) {
@@ -17885,7 +17887,7 @@ async function metaSay(chatId, texto) {
   }
 }
 var META_PEDIDO_MAX_MS = 10 * 6e4;
-function metaPedidoVelho(createdAt, now = Date.now()) {
+function metaPedidoVelho(createdAt, now = Date.now() + serverSkewMs) {
   const t = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
   return !Number.isNaN(t) && now - t > META_PEDIDO_MAX_MS;
 }
@@ -17960,6 +17962,7 @@ var AuthError = class extends Error {
 var REPLY_MAX = 2e4;
 var DELIVER_MAX = 5e4;
 var SHOP_MAX = 6e4;
+var serverSkewMs = 0;
 async function api(path, { method = "GET", body, timeoutMs = 15e3 } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -17970,6 +17973,8 @@ async function api(path, { method = "GET", body, timeoutMs = 15e3 } = {}) {
       body: body ? JSON.stringify(body) : void 0,
       signal: ctrl.signal
     });
+    const dh = Date.parse(res.headers.get("date") ?? "");
+    if (!Number.isNaN(dh)) serverSkewMs = dh - Date.now();
     if (res.status === 401) throw new AuthError("chave inv\xE1lida");
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
