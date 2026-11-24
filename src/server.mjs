@@ -511,11 +511,6 @@ function pedeEmProsa(body) {
   const ultima = (linhas[linhas.length - 1] ?? "").replace(/[\s)*_"'”’»\p{Extended_Pictographic}\uFE0F]+$/u, "");
   return /\?$/.test(ultima) || PROSA_PEDE_RE.test(body);
 }
-// 0.17.1 (onda 45b.1): o botão Atualizar da aba só sai da espera com um retrato novo (saved_at). O Iron já respondeu "nada mudou"
-// sem gravar: até o ads_status, o reply traz um lembrete. Só o texto exato do botão liga (conversa sobre anúncios não).
-// Gate: no máximo 2 lembretes por clique e 30 min desde o clique, sem renovar: quem não consegue medir diz o motivo e o assunto
-// segue sem lembrete. O ads_status não tem chat_id: limpa o que foi pedido ANTES dele e na mesma loja (o 2º clique sobrevive).
-// 0.19.0 (onda 51b): o período "Hoje" vem como "· hoje".
 // 0.34.0 (onda 68): botão "Conectar Meta" do site. Só a frase exata; o plugin resolve sozinho, sem passar pelo Claude, e roda
 // só os comandos fixos de src/metaLogin.mjs (nada da mensagem vira argumento).
 const META_CONNECT_RE = /^\s*meta: conectar\s*$/i;
@@ -531,6 +526,12 @@ async function metaSay(chatId, texto) {
   } catch (e) {
     log(`meta: aviso no chat falhou: ${e.message}`);
   }
+}
+// gate r1: pedido de conectar com mais de 10 min (Iron estava fechado) não abre o Facebook do nada
+const META_PEDIDO_MAX_MS = 10 * 60_000;
+function metaPedidoVelho(createdAt, now = Date.now()) {
+  const t = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
+  return !Number.isNaN(t) && now - t > META_PEDIDO_MAX_MS;
 }
 function metaConectar(chatId) {
   const winTxt = "Abri uma janela preta do Windows com o login da Meta. O Facebook abre no seu navegador: entre e clique em Continuar. Pode fechar a janela preta depois.";
@@ -548,9 +549,18 @@ function metaConectar(chatId) {
     if (r === "connected") return metaSay(chatId, "Meta conectada ✅ Já pode pedir: como estão meus anúncios?");
     if (r === "timeout") return metaSay(chatId, "Não terminou o login. Clique de novo em Conectar Meta quando quiser.");
     if (r === "failed") return metaSay(chatId, "Não consegui ligar a Meta por aqui. Use o caminho manual em Integrações → Meta → Não funcionou? Faça pelo terminal.");
-  }).catch((e) => log(`meta: login falhou: ${e.message}`));
+  }).catch((e) => {
+    log(`meta: login falhou: ${e.message}`);
+    // gate r1: nunca mudo: o aluno fica sabendo no chat
+    return metaSay(chatId, "Não consegui ligar a Meta por aqui. Use o caminho manual em Integrações → Meta → Não funcionou? Faça pelo terminal.");
+  });
 }
 
+// 0.17.1 (onda 45b.1): o botão Atualizar da aba só sai da espera com um retrato novo (saved_at). O Iron já respondeu "nada mudou"
+// sem gravar: até o ads_status, o reply traz um lembrete. Só o texto exato do botão liga (conversa sobre anúncios não).
+// Gate: no máximo 2 lembretes por clique e 30 min desde o clique, sem renovar: quem não consegue medir diz o motivo e o assunto
+// segue sem lembrete. O ads_status não tem chat_id: limpa o que foi pedido ANTES dele e na mesma loja (o 2º clique sobrevive).
+// 0.19.0 (onda 51b): o período "Hoje" vem como "· hoje".
 const ADS_REFRESH_RE = /^\s*anúncios: atualizar(?: · (?:\d+ dias|hoje))?\s*$/i;
 const ADS_REFRESH_AVISO = "\nLembrete: pedido do botão Atualizar. A aba só sai da espera com o ads_status, mesmo com números iguais: meça tudo, releia a ficha e grave (com Shopify, ads_by_product antes). Se não deu pra medir, diga o motivo ao aluno e pare.";
 const ADS_REFRESH_MAX_AVISOS = 2;
@@ -1818,7 +1828,8 @@ async function pullOnce() {
     if (!system && (META_CONNECT_RE.test(content) || metaClique)) {
       remember(m.id);
       toAck.push(m.id);
-      metaConectar(chatId);
+      if (metaPedidoVelho(m.created_at)) metaSay(chatId, "Esse pedido de conectar a Meta ficou esperando o Iron abrir e já é antigo. Clique de novo em Conectar Meta.");
+      else metaConectar(chatId);
       continue;
     }
     // 0.15.0: pedido de trilha P ganha a dica na 1ª linha (antes do [loja: …]); sem o gatilho, nada muda
@@ -1971,8 +1982,9 @@ async function presencePost() {
   const feed = feedOn();
   const mcp = feed ? mcpServerNames() : [];
   // 0.34.0 (onda 68): estado da Meta (o `get` roda no fundo com cache de 60 s; o batimento leva o último lido)
-  meta.status().catch(() => {});
-  const metaStatus = meta.cached();
+  // gate r1: feed desligado (--sem-feed) não roda o `get` nem manda o estado, igual aos conectores
+  if (feed) meta.status().catch(() => {});
+  const metaStatus = feed ? meta.cached() : null;
   try {
     await api("/api/chat/presence", {
       method: "POST",

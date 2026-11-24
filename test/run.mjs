@@ -3157,6 +3157,44 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("68 comando fixo no Mac (terminal invisível do script)", mac.cmd === "script" && JSON.stringify(mac.args) === JSON.stringify(["-q", "/dev/null", "claude", "mcp", "login", "meta-ads"]));
   check("68 comando fixo no Windows (janela do cmd, caminho B)", win.cmd === "cmd.exe" && win.mode === "window" && win.args.at(-1) === 'start "Iron Office - Meta" cmd.exe /k claude mcp login meta-ads');
 
+  check("68 gate r1: 'Disconnected', 'Not connected' e 'Failed to connect' nunca viram conectada", ["meta-ads:\n  Status: ✘ Disconnected", "meta-ads:\n  Status: Not connected", "meta-ads:\n  Status: ✘ Failed to connect"].every((t) => parseMetaStatus(t, 0) === "unknown"));
+  {
+    // login que sai na hora sem link (claude sem o subcomando, fora do PATH): nada de "abri o Facebook"
+    const evs = [];
+    const fake = createMeta({
+      platform: "darwin",
+      exec: async () => ({ code: 0, out: "meta-ads:\n  Status: ! Needs authentication" }),
+      spawn: () => { const ee = new EventEmitterClass(); ee.exitCode = null; ee.kill = () => {}; setTimeout(() => { ee.exitCode = 1; ee.emit("exit", 1); }, 50); return ee; },
+      timeoutMs: 5000, pollMs: 10_000,
+    });
+    const r = await fake.connect((e) => evs.push(e));
+    check("68 gate r1: login que falha na hora → 'failed' e SEM 'opened'", r === "failed" && !evs.includes("opened"), `${r} ${evs}`);
+    // tempo-limite seguido do exit do kill: nada depois do fim
+    const evs2 = [];
+    const fake2 = createMeta({
+      platform: "darwin",
+      exec: async () => ({ code: 0, out: "meta-ads:\n  Status: ! Needs authentication" }),
+      spawn: () => { const ee = new EventEmitterClass(); ee.exitCode = null; ee.kill = () => { setTimeout(() => ee.emit("exit", 1), 20); }; return ee; },
+      timeoutMs: 300, pollMs: 10_000,
+    });
+    const r2 = await fake2.connect((e) => evs2.push(e));
+    await sleep(2000);
+    check("68 gate r1: depois do tempo-limite nenhum evento sai (sem 'abri' atrasado)", r2 === "timeout" && !evs2.includes("opened"), `${r2} ${evs2}`);
+    // Windows: a janela segura o próximo clique por 10 min
+    let t = 0;
+    const fake3 = createMeta({
+      platform: "win32", now: () => t,
+      exec: async () => ({ code: 0, out: "meta-ads:\n  Status: ! Needs authentication" }),
+      spawn: () => { const ee = new EventEmitterClass(); ee.exitCode = 0; ee.kill = () => {}; return ee; },
+      timeoutMs: 100, pollMs: 10_000,
+    });
+    const evs3 = [];
+    await fake3.connect((e) => evs3.push(e));
+    t = 60_000;
+    const r3 = await fake3.connect((e) => evs3.push(e));
+    check("68 gate r1 Windows: 2º clique em 1 min = 'busy' (uma janela só)", evs3.filter((e) => e === "window").length === 1 && r3 === "busy", `${evs3} ${r3}`);
+  }
+
   // unidade: dois cliques = um login; tempo-limite sem travar
   {
     let spawns = 0;
@@ -3187,7 +3225,8 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const LOGF = join(dir, "log");
   writeFileSync(ST, "absent");
   writeFileSync(LOGF, "");
-  const msg = (id, content, meta = {}) => ({ id, conversation_id: "c68", content, meta, created_at: "2026-11-24T18:00:00Z", store: null });
+  // gate r1: pedido com mais de 10 min é ignorado; a mensagem de teste nasce agora
+  const msg = (id, content, meta = {}) => ({ id, conversation_id: "c68", content, meta, created_at: new Date().toISOString(), store: null });
   const env = { IRON_OFFICE_CHANNEL: "1", FAKE_META_STATE: ST, FAKE_META_LOG: LOGF, IRON_OFFICE_META_POLL_MS: "300" };
   const s = startServer(casa(), f.url, env);
   s.handshake();
@@ -3229,6 +3268,31 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   await sleep(5000);
   check("68 opção meta_conectar da ask: login rodou e conectou", chamadas().some((l) => l === "mcp login meta-ads") && readFileSync(ST, "utf8").trim() === "connected", JSON.stringify(chamadas()));
   s.p.kill();
+
+  // gate r1: pedido com mais de 10 min não abre o Facebook
+  writeFileSync(ST, "needs");
+  writeFileSync(LOGF, "");
+  const sv = startServer(casa(), f.url, env);
+  sv.handshake();
+  await sleep(1500);
+  fila.push({ ...msg("m68-velho", "meta: conectar"), created_at: new Date(Date.now() - 11 * 60_000).toISOString() });
+  await sleep(2500);
+  check("68 gate r1: pedido de 11 min atrás → não roda login e avisa que é antigo", !chamadas().some((l) => /login/.test(l)) && falas().some((t) => /já é antigo/.test(t)), JSON.stringify(chamadas()));
+  sv.p.kill();
+
+  // gate r1: --sem-feed não roda o get nem manda meta_status
+  writeFileSync(ST, "connected");
+  writeFileSync(LOGF, "");
+  const hOff = casa();
+  mkdirSync(join(hOff, ".iron"), { recursive: true });
+  writeFileSync(join(hOff, ".iron", "config.yaml"), "owner:\n  name: x\noffice_feed: off\n");
+  const antesOff = f.calls.length;
+  const so = startServer(hOff, f.url, env, hOff);
+  so.handshake();
+  await sleep(3000);
+  const presOff = f.calls.slice(antesOff).filter((c) => c.path === "/api/chat/presence").map((c) => c.body);
+  check("68 gate r1: feed desligado → presença sem meta_status e nenhum `claude mcp get`", presOff.length > 0 && presOff.every((b) => !("meta_status" in b)) && !chamadas().some((l) => /mcp get/.test(l)), JSON.stringify({ presOff, c: chamadas() }));
+  so.p.kill();
 
   // E.5/E.6 no processo: 2 cliques = 1 login; sem Continuar → aviso de não terminou, canal vivo
   writeFileSync(ST, "needs");

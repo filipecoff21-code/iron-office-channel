@@ -23,8 +23,9 @@ export function parseMetaStatus(stdout, code) {
   const m = out.match(/^\s*Status:\s*(.+)$/im);
   if (m) {
     const s = m[1];
-    if (/Connected/i.test(s) && !/Failed/i.test(s)) return "connected";
-    if (/Needs authentication/i.test(s)) return "needs_auth";
+    // gate r1: "Disconnected", "Not connected" e "Failed to connect" nunca viram conectada; só a palavra Connected sozinha
+    if (/needs authentication/i.test(s)) return "needs_auth";
+    if (!/(dis|not\s*|failed)/i.test(s) && /(^|[^a-z])connected\b/i.test(s)) return "connected";
     return "unknown"; // "✘ Failed to connect" e o que vier de novo: não adivinha
   }
   if (code === 1 && !out.trim()) return "unknown";
@@ -69,6 +70,9 @@ export function createMeta(deps = {}) {
   let cache = null; // { state, at }
   let refreshing = null;
   let running = null; // login em andamento (uma vez por vez)
+  // gate r1 (Windows): o `start` solta a janela do cmd e o kill não a alcança; depois do tempo-limite a janela pode seguir
+  // esperando o Facebook. Até 10 min depois de abrir, o próximo clique responde "já estou esperando" em vez de abrir outra.
+  let windowUntil = 0;
 
   async function status({ fresh = false } = {}) {
     if (!fresh && cache && now() - cache.at < STATUS_TTL_MS) return cache.state;
@@ -95,7 +99,7 @@ export function createMeta(deps = {}) {
    * Devolve "connected" | "timeout" | "failed" | "busy" | "already".
    */
   function connect(on = () => {}) {
-    if (running) { on("busy"); return Promise.resolve("busy"); }
+    if (running || now() < windowUntil) { on("busy"); return Promise.resolve("busy"); }
     running = (async () => {
       let st = await status({ fresh: true });
       if (st === "connected") { on("already"); return "already"; }
@@ -121,19 +125,27 @@ export function createMeta(deps = {}) {
           if (done) return;
           done = true;
           clearTimeout(timer);
+          clearTimeout(opened);
           clearInterval(poll);
           try { if (child.exitCode === null) child.kill(); } catch { /* já saiu */ }
           resolve(r);
         };
         const timer = setTimeout(() => finish("timeout"), timeoutMs);
+        // gate r1: "abri o Facebook" só se o processo seguiu vivo 1,5 s (claude ausente ou sem o `login` sai antes)
+        // e nunca depois do fim; o link chega junto se já tiver aparecido na saída
+        const opened = setTimeout(() => {
+          if (done || sentLink || mode === "window") return;
+          sentLink = true;
+          on("opened", findOauthUrl(buf));
+        }, 1500);
         // Windows (janela própria) e garantia geral: o estado que manda é o `get`
         const poll = setInterval(async () => {
           if ((await status({ fresh: true })) === "connected") finish("connected");
         }, pollMs);
-        if (mode === "window") on("window");
+        if (mode === "window") { windowUntil = now() + 10 * 60_000; on("window"); }
         const onData = (d) => {
           buf = (buf + String(d)).slice(-20_000);
-          if (!sentLink) {
+          if (!sentLink && !done) {
             const url = findOauthUrl(buf);
             if (url) { sentLink = true; on("opened", url); }
           }
@@ -142,10 +154,13 @@ export function createMeta(deps = {}) {
         child.stderr?.on("data", onData);
         child.on("error", () => finish("failed"));
         child.on("exit", async (code) => {
-          if (mode === "window") return; // o `start` sai na hora; quem decide é o poll
-          if (!sentLink) on("opened", null);
-          const st2 = await status({ fresh: true });
-          void code; // o código de saída não basta: quem manda é o `get`
+          if (mode === "window" || done) return; // o `start` sai na hora (quem decide é o poll); depois do fim, nada
+          let st2 = await status({ fresh: true });
+          // gate r1: login saiu com 0 e o `get` ainda não viu: o token pode gravar com atraso; uma 2ª leitura
+          if (st2 !== "connected" && code === 0) {
+            await new Promise((r) => setTimeout(r, 2000));
+            st2 = await status({ fresh: true });
+          }
           finish(st2 === "connected" ? "connected" : "failed");
         });
       });

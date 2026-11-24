@@ -17199,8 +17199,8 @@ function parseMetaStatus(stdout, code) {
   const m = out.match(/^\s*Status:\s*(.+)$/im);
   if (m) {
     const s = m[1];
-    if (/Connected/i.test(s) && !/Failed/i.test(s)) return "connected";
-    if (/Needs authentication/i.test(s)) return "needs_auth";
+    if (/needs authentication/i.test(s)) return "needs_auth";
+    if (!/(dis|not\s*|failed)/i.test(s) && /(^|[^a-z])connected\b/i.test(s)) return "connected";
     return "unknown";
   }
   if (code === 1 && !out.trim()) return "unknown";
@@ -17233,6 +17233,7 @@ function createMeta(deps = {}) {
   let cache = null;
   let refreshing = null;
   let running = null;
+  let windowUntil = 0;
   async function status({ fresh = false } = {}) {
     if (!fresh && cache && now() - cache.at < STATUS_TTL_MS) return cache.state;
     if (refreshing) return refreshing;
@@ -17250,7 +17251,7 @@ function createMeta(deps = {}) {
   }
   function connect(on = () => {
   }) {
-    if (running) {
+    if (running || now() < windowUntil) {
       on("busy");
       return Promise.resolve("busy");
     }
@@ -17282,6 +17283,7 @@ function createMeta(deps = {}) {
           if (done) return;
           done = true;
           clearTimeout(timer);
+          clearTimeout(opened);
           clearInterval(poll);
           try {
             if (child.exitCode === null) child.kill();
@@ -17290,13 +17292,21 @@ function createMeta(deps = {}) {
           resolve2(r);
         };
         const timer = setTimeout(() => finish("timeout"), timeoutMs);
+        const opened = setTimeout(() => {
+          if (done || sentLink || mode2 === "window") return;
+          sentLink = true;
+          on("opened", findOauthUrl(buf));
+        }, 1500);
         const poll = setInterval(async () => {
           if (await status({ fresh: true }) === "connected") finish("connected");
         }, pollMs);
-        if (mode2 === "window") on("window");
+        if (mode2 === "window") {
+          windowUntil = now() + 10 * 6e4;
+          on("window");
+        }
         const onData = (d) => {
           buf = (buf + String(d)).slice(-2e4);
-          if (!sentLink) {
+          if (!sentLink && !done) {
             const url = findOauthUrl(buf);
             if (url) {
               sentLink = true;
@@ -17308,10 +17318,12 @@ function createMeta(deps = {}) {
         child.stderr?.on("data", onData);
         child.on("error", () => finish("failed"));
         child.on("exit", async (code) => {
-          if (mode2 === "window") return;
-          if (!sentLink) on("opened", null);
-          const st2 = await status({ fresh: true });
-          void code;
+          if (mode2 === "window" || done) return;
+          let st2 = await status({ fresh: true });
+          if (st2 !== "connected" && code === 0) {
+            await new Promise((r) => setTimeout(r, 2e3));
+            st2 = await status({ fresh: true });
+          }
           finish(st2 === "connected" ? "connected" : "failed");
         });
       });
@@ -17872,6 +17884,11 @@ async function metaSay(chatId, texto) {
     log(`meta: aviso no chat falhou: ${e.message}`);
   }
 }
+var META_PEDIDO_MAX_MS = 10 * 6e4;
+function metaPedidoVelho(createdAt, now = Date.now()) {
+  const t = typeof createdAt === "string" ? Date.parse(createdAt) : NaN;
+  return !Number.isNaN(t) && now - t > META_PEDIDO_MAX_MS;
+}
 function metaConectar(chatId) {
   const winTxt = "Abri uma janela preta do Windows com o login da Meta. O Facebook abre no seu navegador: entre e clique em Continuar. Pode fechar a janela preta depois.";
   meta2.connect((ev, dado) => {
@@ -17888,7 +17905,10 @@ Se a aba n\xE3o abriu, [clique aqui pra entrar no Facebook](${dado}).` : "Abri o
     if (r === "connected") return metaSay(chatId, "Meta conectada \u2705 J\xE1 pode pedir: como est\xE3o meus an\xFAncios?");
     if (r === "timeout") return metaSay(chatId, "N\xE3o terminou o login. Clique de novo em Conectar Meta quando quiser.");
     if (r === "failed") return metaSay(chatId, "N\xE3o consegui ligar a Meta por aqui. Use o caminho manual em Integra\xE7\xF5es \u2192 Meta \u2192 N\xE3o funcionou? Fa\xE7a pelo terminal.");
-  }).catch((e) => log(`meta: login falhou: ${e.message}`));
+  }).catch((e) => {
+    log(`meta: login falhou: ${e.message}`);
+    return metaSay(chatId, "N\xE3o consegui ligar a Meta por aqui. Use o caminho manual em Integra\xE7\xF5es \u2192 Meta \u2192 N\xE3o funcionou? Fa\xE7a pelo terminal.");
+  });
 }
 var ADS_REFRESH_RE = /^\s*anúncios: atualizar(?: · (?:\d+ dias|hoje))?\s*$/i;
 var ADS_REFRESH_AVISO = "\nLembrete: pedido do bot\xE3o Atualizar. A aba s\xF3 sai da espera com o ads_status, mesmo com n\xFAmeros iguais: me\xE7a tudo, releia a ficha e grave (com Shopify, ads_by_product antes). Se n\xE3o deu pra medir, diga o motivo ao aluno e pare.";
@@ -19052,7 +19072,8 @@ async function pullOnce() {
     if (!system && (META_CONNECT_RE.test(content) || metaClique)) {
       remember(m.id);
       toAck.push(m.id);
-      metaConectar(chatId);
+      if (metaPedidoVelho(m.created_at)) metaSay(chatId, "Esse pedido de conectar a Meta ficou esperando o Iron abrir e j\xE1 \xE9 antigo. Clique de novo em Conectar Meta.");
+      else metaConectar(chatId);
       continue;
     }
     const dica = !system && pedidoTrilhaP(content) ? TRILHA_P_DICA : "";
@@ -19178,9 +19199,9 @@ function mcpServerNames(home = homedir3(), cwd = process.cwd(), env = process.en
 async function presencePost() {
   const feed = feedOn();
   const mcp2 = feed ? mcpServerNames() : [];
-  meta2.status().catch(() => {
+  if (feed) meta2.status().catch(() => {
   });
-  const metaStatus = meta2.cached();
+  const metaStatus = feed ? meta2.cached() : null;
   try {
     await api("/api/chat/presence", {
       method: "POST",
