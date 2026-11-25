@@ -19,7 +19,7 @@ import { createMeta } from "./metaLogin.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.34.0";
+const VERSION = "0.35.0";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");
@@ -208,7 +208,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Regra igual à do site (lib/pages.ts validPageUrl): http(s), ≤ 500, sem usuário:senha, porta padrão, host com TLD.
 const PAGE_KINDS = ["landing", "clone", "shopify", "outra", "referencia"];
 // onda 43 + 57: as chaves de botão com link que a `ask` aceita (a URL mora só no site)
-const ASK_LINKS = ["dropkiller", "shopify", "droplatam"];
+// onda 72: "releasit" = instalar o Releasit COD Form pelo link de parceiro (a URL mora só no site, lib/platforms.ts)
+const ASK_LINKS = ["dropkiller", "shopify", "droplatam", "releasit"];
 
 // Onda 65: lista branca dos pedidos da Droplatam/Dropi. Só estes 6 campos saem do computador do aluno; qualquer outra
 // chave (nome, telefone, endereço, documento, id, guia) é apagada AQUI, antes do site (que também recusa).
@@ -766,7 +767,7 @@ const TOOLS = DEGRADED
               description: "Opcional: formulário, 1 a 12 campos { id (a-z, 0-9, _; até 24), label (até 80), placeholder (até 60), kind: text | number | money | yesno }. Com fields, não mande options.",
               items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, kind: { type: "string", enum: FIELD_KINDS } }, required: ["id", "label"] },
             },
-            link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um botão com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o botão não aparece, então o texto da pergunta tem que valer sozinho); 'droplatam' = Criar minha conta na Droplatam (o site abre a escolha do país com o link da comunidade). Nunca uma URL." },
+            link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um botão com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o botão não aparece, então o texto da pergunta tem que valer sozinho); 'droplatam' = Criar minha conta na Droplatam (o site abre a escolha do país com o link da comunidade); 'releasit' = Instalar o Releasit pelo link da comunidade (checkout de pagamento na entrega; o site abre o link de parceiro e escreve o benefício, não repita número no texto). Nunca uma URL." },
             images: { type: "array", items: { type: "string" }, description: "Opcional (onda 59): escolha entre imagens = `images` com 1 a 8 ids COMPLETOS da aba Imagens (os do image_generate); o site mostra as miniaturas e o clique volta como 'imagem escolhida: <id>'. Nunca mande link de imagem no `reply` pra escolher. Com images, options e free são opcionais." },
             vector: { type: "string", description: "Opcional (0.29.1): depois do image_vectorize, `vector` = o id COMPLETO da imagem. O site troca a pergunta por 'O vetor ficou igual ao seu logo?' com os botões 'Sim, ficou igual' e 'Não ficou igual' (o Sim aprova com a sessão do aluno). Vai sozinho: sem options, fields, images ou link." },
             project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da última mensagem." },
@@ -1222,7 +1223,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     // gate 43: só string (o site recusa não-string; String(["dropkiller"]) passaria aqui)
     const link = args.link;
     // 0.27.0 (onda 57): + "shopify" (Criar minha loja na Shopify); a lista é a mesma do enum da ferramenta
-    if (link !== undefined && (typeof link !== "string" || !ASK_LINKS.includes(link))) return text("link: só as chaves 'dropkiller', 'shopify' e 'droplatam' existem hoje.", true);
+    if (link !== undefined && (typeof link !== "string" || !ASK_LINKS.includes(link))) return text("link: só as chaves 'dropkiller', 'shopify', 'droplatam' e 'releasit' existem hoje.", true);
     if (raw.length > Q_OPTIONS_MAX) return text(`Opções demais (${raw.length}; máximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;

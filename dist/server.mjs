@@ -17480,7 +17480,7 @@ function porteiroAskCheck(text2, options, { home = homedir2() } = {}) {
 }
 
 // src/server.mjs
-var VERSION = "0.34.0";
+var VERSION = "0.35.0";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join5(homedir3(), ".claude", "iron-office-api-key");
@@ -17618,7 +17618,7 @@ function storePrefix(store) {
 }
 var UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var PAGE_KINDS = ["landing", "clone", "shopify", "outra", "referencia"];
-var ASK_LINKS = ["dropkiller", "shopify", "droplatam"];
+var ASK_LINKS = ["dropkiller", "shopify", "droplatam", "releasit"];
 var SLIM_KEYS = ["status", "total", "supplier_cost", "shipping", "created_at", "currency"];
 var STATUS_OK = /^[\p{L}_ ()\-.,]{1,60}$/u;
 var DATE_OK = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
@@ -18095,7 +18095,7 @@ var TOOLS = DEGRADED ? [
           description: "Opcional: formul\xE1rio, 1 a 12 campos { id (a-z, 0-9, _; at\xE9 24), label (at\xE9 80), placeholder (at\xE9 60), kind: text | number | money | yesno }. Com fields, n\xE3o mande options.",
           items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, kind: { type: "string", enum: FIELD_KINDS } }, required: ["id", "label"] }
         },
-        link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um bot\xE3o com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o bot\xE3o n\xE3o aparece, ent\xE3o o texto da pergunta tem que valer sozinho); 'droplatam' = Criar minha conta na Droplatam (o site abre a escolha do pa\xEDs com o link da comunidade). Nunca uma URL." },
+        link: { type: "string", enum: ASK_LINKS, description: "Opcional: chave de um bot\xE3o com link que o site conhece: 'dropkiller' = assinar o DropKiller com o link do Iron Office; 'shopify' = Criar minha loja na Shopify (link de parceiro; sem ele configurado o bot\xE3o n\xE3o aparece, ent\xE3o o texto da pergunta tem que valer sozinho); 'droplatam' = Criar minha conta na Droplatam (o site abre a escolha do pa\xEDs com o link da comunidade); 'releasit' = Instalar o Releasit pelo link da comunidade (checkout de pagamento na entrega; o site abre o link de parceiro e escreve o benef\xEDcio, n\xE3o repita n\xFAmero no texto). Nunca uma URL." },
         images: { type: "array", items: { type: "string" }, description: "Opcional (onda 59): escolha entre imagens = `images` com 1 a 8 ids COMPLETOS da aba Imagens (os do image_generate); o site mostra as miniaturas e o clique volta como 'imagem escolhida: <id>'. Nunca mande link de imagem no `reply` pra escolher. Com images, options e free s\xE3o opcionais." },
         vector: { type: "string", description: "Opcional (0.29.1): depois do image_vectorize, `vector` = o id COMPLETO da imagem. O site troca a pergunta por 'O vetor ficou igual ao seu logo?' com os bot\xF5es 'Sim, ficou igual' e 'N\xE3o ficou igual' (o Sim aprova com a sess\xE3o do aluno). Vai sozinho: sem options, fields, images ou link." },
         project_id: { type: "string", description: "Opcional: id da loja. Sem ele, a loja da \xFAltima mensagem." }
@@ -18509,7 +18509,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     }
     const link = args.link;
-    if (link !== void 0 && (typeof link !== "string" || !ASK_LINKS.includes(link))) return text("link: s\xF3 as chaves 'dropkiller', 'shopify' e 'droplatam' existem hoje.", true);
+    if (link !== void 0 && (typeof link !== "string" || !ASK_LINKS.includes(link))) return text("link: s\xF3 as chaves 'dropkiller', 'shopify', 'droplatam' e 'releasit' existem hoje.", true);
     if (raw.length > Q_OPTIONS_MAX) return text(`Op\xE7\xF5es demais (${raw.length}; m\xE1ximo ${Q_OPTIONS_MAX}). Junte as parecidas ou use free=true.`, true);
     const free = args.free === true;
     const skip = args.skip === true;

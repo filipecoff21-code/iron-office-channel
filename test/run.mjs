@@ -1755,7 +1755,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   s.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   await sleep(400);
   const ask = (s.out.find((o) => o.msg.id === 2)?.msg.result?.tools ?? []).find((t) => t.name === "ask");
-  check("43 ask: inputSchema.link.enum começa por 'dropkiller' (57: + 'shopify'; 65: + 'droplatam') e a descrição cita link: \"dropkiller\"", JSON.stringify(ask?.inputSchema?.properties?.link?.enum) === '["dropkiller","shopify","droplatam"]' && (ask?.description ?? "").includes('link: "dropkiller"'));
+  check("43 ask: inputSchema.link.enum começa por 'dropkiller' (57: + 'shopify'; 65: + 'droplatam') e a descrição cita link: \"dropkiller\"", JSON.stringify(ask?.inputSchema?.properties?.link?.enum) === '["dropkiller","shopify","droplatam","releasit"]' && (ask?.description ?? "").includes('link: "dropkiller"'));
   const antes = f.calls.filter((c) => c.path === "/api/chat/messages").length;
   call(s, 10, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Já assinei: liga o DropKiller", "Depois"], skip: true, link: "dropkiller" });
   await sleep(500);
@@ -1764,13 +1764,18 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("43 ask com link 'dropkiller' → o site recebe meta.question.link = 'dropkiller' (com as opções)", enviadas.length === antes + 1 && q?.link === "dropkiller" && q?.options?.length === 2 && res(s, 10)?.isError !== true, JSON.stringify(q));
   call(s, 11, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: "loja" });
   await sleep(400);
-  check("43 ask com link desconhecido ('loja') → isError, nada enviado (57: a mensagem cita as duas chaves)", res(s, 11)?.isError === true && txt(s, 11).includes("'dropkiller', 'shopify' e 'droplatam'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
+  check("43 ask com link desconhecido ('loja') → isError, nada enviado (57: a mensagem cita as duas chaves)", res(s, 11)?.isError === true && txt(s, 11).includes("'dropkiller', 'shopify', 'droplatam' e 'releasit'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
   call(s, 14, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: ["dropkiller"] });
   await sleep(400);
   check("43 ask com link em lista (['dropkiller']) → recusado como o site recusa, nada enviado", res(s, 14)?.isError === true && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 14));
   call(s, 12, "ask", { chat_id: "c1", question: "Dados", fields: [{ id: "preco", label: "Preço" }], link: "dropkiller" });
   await sleep(400);
   check("43 ask com fields + link → recusado (o site também recusa), nada enviado", res(s, 12)?.isError === true && txt(s, 12).includes("link não vai no formulário") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 12));
+  // onda 72 (0.35.0): "releasit" passa e chega no site só como chave (nunca a URL do link de parceiro)
+  call(s, 15, "ask", { chat_id: "c1", question: "Instalo o Releasit pelo link da comunidade?", options: ["Sim, abrir o link", "Já tenho um app de pagamento na entrega", "Depois"], link: "releasit" });
+  await sleep(500);
+  const q72 = f.calls.filter((c) => c.path === "/api/chat/messages").at(-1)?.body?.meta?.question;
+  check("72 ask com link 'releasit' → o site recebe meta.question.link = 'releasit' (3 opções) e nenhuma URL do Releasit sai do plugin", res(s, 15)?.isError !== true && q72?.link === "releasit" && q72?.options?.length === 3 && !/releas\.it/i.test(JSON.stringify(f.calls)) && !/releas\.it/i.test(readFileSync(join(ROOT, "src", "server.mjs"), "utf8")), JSON.stringify(q72));
   call(s, 13, "ask", { chat_id: "c1", question: "Sem link?", options: ["A", "B"] });
   await sleep(400);
   const q2 = f.calls.filter((c) => c.path === "/api/chat/messages").pop()?.body?.meta?.question;
@@ -2837,7 +2842,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.34.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.35.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
