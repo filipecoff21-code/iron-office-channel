@@ -19,7 +19,7 @@ import { createMeta } from "./metaLogin.mjs";
 import { fileURLToPath } from "node:url";
 import { redactKeys, feedOn, PORTEIRO_ID_RE, porteiroAskCheck, ENV_ID_RE, ENV_LIBERA_MS, envAskCheck } from "../hooks/shared.mjs";
 
-const VERSION = "0.36.0";
+const VERSION = "0.36.1";
 const PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 const KEY_PATH = join(homedir(), ".claude", "iron-office-api-key");

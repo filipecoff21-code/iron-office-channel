@@ -43,3 +43,6 @@ B1 e B2 resolvidos (adversarial testou cd ../x, subshell, pushd, Set-Location, s
 
 Bateria depois das correções r2: plugin 625/625 ok · instalador lint + 9 baterias verdes.
 PRÓXIMA AÇÃO: LIBERADO. Publicar só depois do gate do Filipe sobre o tom (G4/E.11).
+
+## 0.36.1 (depois do LIBERADO, achado da validação no app real)
+E.6 no app real: com o Não gravado 30 min (correção da r1), o aluno que mudava de ideia e pedia de novo ficava sem jeito de abrir. Ajuste: o porteiro manda seguir sem por conta própria e só refaz a MESMA pergunta (texto e ids do modelo) se o aluno pediu o arquivo de novo na última mensagem; o Sim substitui o Não. Correção pequena e coberta por teste (bateria 625/625); lente ⭐: desfaz em parte a correção do Não da r1 (venceu o plano: E.6 "pedir de novo e clicar Sim"); o que se perde: o Iron, sozinho, ainda pode decidir que o aluno "pediu de novo" — a decisão final continua sendo o clique.

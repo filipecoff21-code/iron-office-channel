@@ -300,7 +300,11 @@ export function envLiberado(caminhoNorm, { home = homedir(), now = Date.now(), t
   const h = envHash(caminhoNorm);
   return arr.some((l) => l && l.tipo === tipo && l.hash === h && Number(l.until) > now);
 }
-export const MOTIVO_ENV_RECUSADO = "[porteiro] O aluno disse Não pra abrir esse arquivo há pouco. Siga sem ele e não pergunte de novo agora.";
+export const MOTIVO_ENV_RECUSADO = "[porteiro] O aluno disse Não pra abrir esse arquivo há pouco. Siga sem ele e não pergunte de novo por conta própria.";
+// E.6 (executor, no app real): depois do Não, o aluno que muda de ideia e PEDE de novo tem que conseguir. A pergunta continua
+// disponível, mas só pra um pedido novo e explícito do aluno; o clique no Sim substitui o Não (gravaLiberacao no servidor).
+export const motivoEnvRecusado = (caminhoNorm, opts = {}) =>
+  MOTIVO_ENV_RECUSADO + " Só se o aluno pediu de novo esse arquivo NA ÚLTIMA MENSAGEM dele, faça a pergunta outra vez: " + motivoEnv(caminhoNorm, opts).replace(/^\[porteiro\] [^]*?Faça UMA pergunta/, "UMA pergunta");
 export const MOTIVO_ENV_CD =
   "[porteiro] Esse pedido muda de pasta (cd, pushd, -C) ou busca .env em qualquer subpasta, e aí não dá pra saber qual arquivo .env é. Rode de novo com o caminho completo do arquivo (ex.: ~/pasta/.env), sem cd no mesmo comando.";
 export const MOTIVO_BUSCA =

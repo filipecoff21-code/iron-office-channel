@@ -2842,7 +2842,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.36.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.36.1", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
@@ -3424,7 +3424,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("S3 r1 I1: Grep com glob sub/.env* pede; glob com o nome da chave barra", ehEnv(ev("Grep", { pattern: "x", path: proj, glob: "sub/.env*" })) && ehChave(ev("Grep", { pattern: "x", path: proj, glob: "**/iron-office-api-key" })));
   check("S3 r1: modelo que termina em .example (.env.local.example) passa; .env.sample.bak pede", ev("Read", { file_path: join(proj, ".env.local.example") }) === null && ehEnv(ev("Read", { file_path: join(proj, ".env.sample.bak") })));
   writeFileSync(lib, JSON.stringify([{ hash: hEnv, tipo: "env-nao", at: Date.now(), until: Date.now() + 30 * 60_000 }]));
-  check("S3 r1: depois do Não (env-nao) o gancho manda seguir sem, não perguntar de novo; recusa não libera instalação", /disse Não pra abrir esse arquivo/.test(barra(ev("Read", { file_path: ENVP })) ?? "") && !/ev-ler-/.test(barra(ev("Read", { file_path: ENVP })) ?? ""));
+  check("S3 r1/E.6: depois do Não (env-nao) o gancho manda seguir sem por conta própria, e só pergunta de novo se o aluno pediu de novo (mesmos ids e texto do modelo)", /disse Não pra abrir esse arquivo/.test(barra(ev("Read", { file_path: ENVP })) ?? "") && /Só se o aluno pediu de novo esse arquivo NA ÚLTIMA MENSAGEM/.test(barra(ev("Read", { file_path: ENVP })) ?? "") && (barra(ev("Read", { file_path: ENVP })) ?? "").includes(`question exatamente "${pergunta}"`) && (barra(ev("Read", { file_path: ENVP })) ?? "").includes(`"id":"ev-ler-${hEnv}"`));
   check("S3 r1: recusa vencida → pergunta de novo", ehEnv(ev("Read", { file_path: ENVP }, { now: Date.now() + 31 * 60_000 })));
   writeFileSync(lib, "[]");
   {

@@ -17555,7 +17555,7 @@ function envAskCheck(text2, options, { home = homedir2(), platform = process.pla
 }
 
 // src/server.mjs
-var VERSION = "0.36.0";
+var VERSION = "0.36.1";
 var PAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var BASE = (process.env.IRON_OFFICE_URL || "https://ironoffice.app").replace(/\/+$/, "");
 var KEY_PATH = join5(homedir3(), ".claude", "iron-office-api-key");

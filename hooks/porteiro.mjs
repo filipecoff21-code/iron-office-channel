@@ -38,7 +38,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   porteiroHash, porteiroItemCurto, porteiroMode, porteiroPergunta, PORTEIRO_ROTULOS, PORTEIRO_SEM_NOME, redactKeys,
   segNorm, ehArquivoDeSenhas, trancado, MOTIVO_TRANCADO, motivoEnv, envHash, envMeio, envLiberado,
-  MOTIVO_ENV_RECUSADO, MOTIVO_ENV_CD, MOTIVO_BUSCA,
+  motivoEnvRecusado, MOTIVO_ENV_CD, MOTIVO_BUSCA,
 } from "./shared.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -646,7 +646,10 @@ export function decide(hook, { home = homedir(), now = Date.now(), platform = pr
   if (seg.busca) return { reason: MOTIVO_BUSCA, registro: { item: "busca na pasta ~/.claude", tipo: "arquivo trancado" } };
   if (seg.curto) return { reason: MOTIVO_ENV_CD, registro: { item: "arquivo .env com mudança de pasta", tipo: "arquivo de senhas" } };
   const recusado = seg.envs.find((c) => envLiberado(c, { home, now, tipo: "env-nao" }));
-  if (recusado) return { reason: MOTIVO_ENV_RECUSADO, registro: { item: envMeio(recusado, { home }), tipo: "arquivo de senhas recusado" } };
+  if (recusado) {
+    const meio = envMeio(recusado, { home });
+    return { reason: motivoEnvRecusado(recusado, { home }), registro: { item: meio, tipo: "arquivo de senhas", hash: envHash(recusado), curto: meio } };
+  }
   const envFechado = seg.envs.find((c) => !envLiberado(c, { home, now }));
   if (envFechado) {
     const meio = envMeio(envFechado, { home });
