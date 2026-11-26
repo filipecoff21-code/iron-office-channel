@@ -165,3 +165,143 @@ export function porteiroAskCheck(text, options, { home = homedir() } = {}) {
   if (item.endsWith("…") && cortadoRegistrado(home, hash, item)) return { ok: true };
   return erro(`o item "${item}" não é o do id`);
 }
+
+// ─── Onda S3 (0.36.0): arquivos de segredo no computador do aluno ───────────────────────────────────────────────────
+// TRANCADOS: a chave do Iron Office (e a anterior), o ~/.claude.json e o ~/.claude/.credentials.json. O Iron nunca abre,
+// sem pergunta e sem liberação possível (a pasta ~/.iron/porteiro já era barrada pelo porteiro de instalação).
+// ARQUIVO DE SENHAS: nome `.env` ou `.env.<algo>` em qualquer pasta, menos os modelos .env.example/.sample/.template.
+// Abre só depois do clique do aluno numa pergunta calma (ids ev-ler-<hash>/ev-nao-<hash>, hash = porteiroHash do caminho
+// absoluto normalizado). Quem libera é o plugin (src/server.mjs), 30 minutos, só aquele caminho.
+export const ENV_ID_RE = /^ev-(ler|nao)-([a-f0-9]{12})$/;
+export const ENV_ROTULOS = { ler: "Sim, pode abrir", nao: "Não" };
+export const ENV_LIBERA_MS = 30 * 60_000;
+const ENV_MODELOS = new Set(["example", "sample", "template"]);
+
+/** Caminho absoluto normalizado: ~ e $HOME expandidos, barra invertida vira barra, sem ./ nem //, `..` resolvido,
+ *  sem barra no fim; minúsculas no Windows (o disco de lá não diferencia). */
+export function segNorm(p, { home = homedir(), cwd = process.cwd(), platform = process.platform } = {}) {
+  const h = String(home).replace(/\\/g, "/").replace(/\/+$/, "");
+  let s = String(p ?? "").replace(/\\/g, "/");
+  s = s.replace(/^~(?=\/|$)/, h).replace(/^\$\{?HOME\}?(?=\/|$)/, h).replace(/^%USERPROFILE%(?=\/|$)/i, h).replace(/^\$env:USERPROFILE(?=\/|$)/i, h);
+  const abs = /^\//.test(s) || /^[A-Za-z]:\//.test(s);
+  if (!abs) s = String(cwd).replace(/\\/g, "/").replace(/\/+$/, "") + "/" + s;
+  const drive = /^[A-Za-z]:/.exec(s)?.[0] ?? "";
+  const partes = [];
+  for (const parte of s.slice(drive.length).split("/")) {
+    if (!parte || parte === ".") continue;
+    if (parte === "..") partes.pop();
+    else partes.push(parte);
+  }
+  const out = drive + "/" + partes.join("/");
+  return platform === "win32" ? out.toLowerCase() : out;
+}
+
+const baseName = (p) => String(p).replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop();
+
+/** Arquivo de senhas (P2): `.env` ou `.env.<algo>`; os 3 modelos passam livres. */
+export function ehArquivoDeSenhas(p) {
+  const b = baseName(p).toLowerCase();
+  if (b === ".env") return true;
+  const m = /^\.env\.(.+)$/.exec(b);
+  // gate S3 r1: modelo é o que TERMINA em .example/.sample/.template (.env.local.example também)
+  return !!m && !ENV_MODELOS.has(m[1].split(".").pop());
+}
+
+/** Trancado (P1): devolve "chave" (chave do Iron Office), "conta" (~/.claude.json, credenciais) ou null. */
+export function trancado(p, opts = {}) {
+  const n = segNorm(p, opts);
+  const h = segNorm(opts.home ?? homedir(), { ...opts, cwd: "/" });
+  const low = n.toLowerCase(), hl = h.toLowerCase();
+  if (low === `${hl}/.claude/iron-office-api-key` || low === `${hl}/.claude/iron-office-api-key.anterior`) return "chave";
+  if (low === `${hl}/.claude.json` || low === `${hl}/.claude/.credentials.json`) return "conta";
+  return null;
+}
+
+export const MOTIVO_TRANCADO = {
+  chave: "[porteiro] Esse arquivo guarda a chave do Iron Office e o Iron não abre. Se o aluno precisa dela, ele gera outra em ironoffice.app. Não há liberação: não tente por outro caminho e não pergunte ao aluno.",
+  conta: "[porteiro] Esse arquivo guarda a conta e os conectores do Claude e o Iron não abre. Não há liberação: não tente por outro caminho e não pergunte ao aluno. Pra ver os conectores, use a ferramenta status do plugin.",
+};
+
+// a pasta aparece com ~ quando está na home; caminho longo demais pro chat (300) vira "…/<últimas pastas>" e o servidor
+// confere pelo registro do gancho (o mesmo jeito do nome cortado do porteiro, onda 59)
+const ENV_PRE = "O Iron quer abrir o arquivo ";
+const ENV_SUF = ". Esse tipo de arquivo costuma guardar senhas de outros sistemas. Foi você que pediu algo que precisa dele?";
+const ENV_MEIO_MAX = 300 - ENV_PRE.length - ENV_SUF.length;
+const ENV_PASTA_SEP = " da pasta ";
+function pastaVisivel(dir, home) {
+  const h = String(home).replace(/\\/g, "/").replace(/\/+$/, "");
+  // gate S3 r1: só com a caixa exata (no macOS /TMP e /tmp são a mesma pasta, mas o hash é do texto: ~ esconderia a diferença)
+  if (dir === h) return "~";
+  return dir.startsWith(h + "/") ? "~" + dir.slice(h.length) : dir;
+}
+/** O meio da pergunta ("<nome> da pasta <pasta>") pro caminho já normalizado; cortado se não cabe. */
+export function envMeio(caminhoNorm, { home = homedir() } = {}) {
+  const i = caminhoNorm.lastIndexOf("/");
+  const nome = caminhoNorm.slice(i + 1);
+  const dir = caminhoNorm.slice(0, i) || "/";
+  let pasta = pastaVisivel(dir, home);
+  let meio = nome + ENV_PASTA_SEP + pasta;
+  if (meio.length <= ENV_MEIO_MAX) return meio;
+  const partes = pasta.split("/");
+  while (partes.length > 1 && ("…/" + partes.join("/")).length + nome.length + ENV_PASTA_SEP.length > ENV_MEIO_MAX) partes.shift();
+  pasta = "…/" + partes.join("/");
+  meio = nome + ENV_PASTA_SEP + pasta;
+  return meio.length <= ENV_MEIO_MAX ? meio : meio.slice(0, ENV_MEIO_MAX - 1) + "…";
+}
+export const envPergunta = (caminhoNorm, opts = {}) => ENV_PRE + envMeio(caminhoNorm, opts) + ENV_SUF;
+export const envHash = (caminhoNorm) => porteiroHash(caminhoNorm);
+
+export function motivoEnv(caminhoNorm, opts = {}) {
+  const h = envHash(caminhoNorm);
+  return (
+    `[porteiro] O arquivo ${envMeio(caminhoNorm, opts)} costuma guardar senhas e o aluno ainda não liberou. NÃO tente abrir por outro caminho. ` +
+    `Faça UMA pergunta pelo ask, sem alarme: question exatamente "${envPergunta(caminhoNorm, opts)}" ` +
+    `options exatamente [{"id":"ev-ler-${h}","label":"${ENV_ROTULOS.ler}"},{"id":"ev-nao-${h}","label":"${ENV_ROTULOS.nao}"}]. ` +
+    `Só depois de "${ENV_ROTULOS.ler}" o arquivo abre (30 minutos, só ele). "${ENV_ROTULOS.nao}" → siga sem o arquivo e não pergunte de novo. ` +
+    `Mesmo aberto, o conteúdo dele nunca vai pro reply, pro deliver nem pro page_save.`
+  );
+}
+
+/** Confere o ask com ids ev-: null (não é pergunta de .env), { ok: true } ou { ok: false, error }. */
+export function envAskCheck(text, options, { home = homedir(), platform = process.platform } = {}) {
+  const opts = Array.isArray(options) ? options : [];
+  if (!opts.some((o) => typeof o?.id === "string" && o.id.startsWith("ev-"))) return null;
+  const erro = (e) => ({ ok: false, error: `Pergunta do arquivo de senhas fora do modelo: ${e}. Use exatamente o texto e as opções que o motivo do porteiro mandou.` });
+  let hash = null;
+  for (const o of opts) {
+    const m = typeof o?.id === "string" ? ENV_ID_RE.exec(o.id) : null;
+    if (!m) return erro(`a opção "${o?.label ?? ""}" não é do arquivo de senhas`);
+    if (hash && m[2] !== hash) return erro("as opções apontam pra arquivos diferentes");
+    hash = m[2];
+    if (o.label !== ENV_ROTULOS[m[1]]) return erro(`o rótulo do id ${o.id} tem que ser "${ENV_ROTULOS[m[1]]}"`);
+  }
+  const t = String(text ?? "");
+  if (!t.startsWith(ENV_PRE) || !t.endsWith(ENV_SUF) || t.length <= ENV_PRE.length + ENV_SUF.length) return erro("o texto da pergunta mudou");
+  const meio = t.slice(ENV_PRE.length, t.length - ENV_SUF.length);
+  // o nome do arquivo pode ter " da pasta " dentro: tenta cada ponto de corte
+  for (let i = meio.indexOf(ENV_PASTA_SEP); i > 0; i = meio.indexOf(ENV_PASTA_SEP, i + 1)) {
+    const nome = meio.slice(0, i), pasta = meio.slice(i + ENV_PASTA_SEP.length);
+    if (!ehArquivoDeSenhas(nome) || nome.includes("/")) continue;
+    if (pasta.startsWith("…")) continue;
+    const caminho = segNorm(pasta + "/" + nome, { home, cwd: "/", platform });
+    if (envHash(caminho) === hash && envMeio(caminho, { home }) === meio) return { ok: true };
+  }
+  // caminho cortado: vale só se o GANCHO barrou esse hash com esse mesmo texto
+  if (meio.includes("…") && cortadoRegistrado(home, hash, meio)) return { ok: true };
+  return erro("o arquivo da pergunta não é o do id");
+}
+
+/** Liberação válida de .env pra esse caminho normalizado (lida do liberados.json do porteiro). tipo "env-nao" = o aluno
+ *  clicou Não há menos de 30 min (gate S3 r1: sem isso o gancho mandava perguntar de novo e o servidor mandava não perguntar). */
+export function envLiberado(caminhoNorm, { home = homedir(), now = Date.now(), tipo = "env" } = {}) {
+  let arr;
+  try { arr = JSON.parse(readFileSync(join(home, ".iron", "porteiro", "liberados.json"), "utf8")); } catch { return false; }
+  if (!Array.isArray(arr)) return false;
+  const h = envHash(caminhoNorm);
+  return arr.some((l) => l && l.tipo === tipo && l.hash === h && Number(l.until) > now);
+}
+export const MOTIVO_ENV_RECUSADO = "[porteiro] O aluno disse Não pra abrir esse arquivo há pouco. Siga sem ele e não pergunte de novo agora.";
+export const MOTIVO_ENV_CD =
+  "[porteiro] Esse pedido muda de pasta (cd, pushd, -C) ou busca .env em qualquer subpasta, e aí não dá pra saber qual arquivo .env é. Rode de novo com o caminho completo do arquivo (ex.: ~/pasta/.env), sem cd no mesmo comando.";
+export const MOTIVO_BUSCA =
+  "[porteiro] Essa busca passa pela pasta ~/.claude, onde ficam a chave do Iron Office e a conta do Claude, e o Iron não lê essa pasta assim. Busque dentro da pasta do projeto. Não há liberação: não pergunte ao aluno.";

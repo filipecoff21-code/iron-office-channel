@@ -2235,7 +2235,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("54o: casa.json ordenado e sem repetido", Object.values(cj).every((a) => Array.isArray(a) && a.length > 0 && a.join("\n") === [...new Set(a)].sort().join("\n")));
   const hj = JSON.parse(readFileSync(join(ROOT, "hooks", "hooks.json"), "utf8"));
   const pre = hj.hooks.PreToolUse?.[0];
-  check("54: hooks.json com PreToolUse (Bash|PowerShell|Write|Edit, timeout) e a telemetria intacta", pre?.matcher === "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit" && pre.hooks[0].timeout === 5 && /porteiro\.mjs/.test(pre.hooks[0].command) && ["PostToolUse", "SubagentStart", "SubagentStop", "Stop"].every((k) => /post-event\.mjs/.test(hj.hooks[k][0].hooks[0].command)));
+  check("54: hooks.json com PreToolUse (Bash|PowerShell|Write|Edit, timeout) e a telemetria intacta", pre?.matcher === "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep" && pre.hooks[0].timeout === 5 && /porteiro\.mjs/.test(pre.hooks[0].command) && ["PostToolUse", "SubagentStart", "SubagentStop", "Stop"].every((k) => /post-event\.mjs/.test(hj.hooks[k][0].hooks[0].command)));
   // falso positivo: todo comando de instalação citado em código nas skills e agentes da casa passa
   const cli = join(ROOT, "..", "iron-edge-cli");
   const mds = [];
@@ -2489,7 +2489,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
       check("54.1: o item é a url e, liberada, o mesmo comando passa", /"https:\/\/x\/i\.sh" \(script baixado ou gerado\)/.test(antes) && d?.pass === true && !d?.reason);
     }
     const hj = JSON.parse(readFileSync(join(ROOT, "hooks", "hooks.json"), "utf8"));
-    check("R7: matcher do gancho inclui MultiEdit e NotebookEdit", hj.hooks.PreToolUse[0].matcher === "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit");
+    check("R7: matcher do gancho inclui MultiEdit e NotebookEdit", hj.hooks.PreToolUse[0].matcher === "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep");
     const big = "npm i evil " + Array.from({ length: 140000 }, (_, i) => "p" + i).join(" ");
     check("54 r1: comando com 140 mil argumentos não estoura a pilha (barra, não passa calado)", /"evil"/.test(decide({ tool_name: "Bash", tool_input: { command: big }, cwd: tmpdir() }, { home })?.reason ?? ""));
     const tok = "ghp_" + "Z".repeat(36);
@@ -2842,7 +2842,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   const g = js(s, 18);
   check("59 image_generate com 2+ imagens: 'proximo' manda a ask com images, nunca os links", /`ask` com `images`/.test(g.proximo ?? "") && g.images?.length === 2 && !/sign\.supabase/.test(txt(s, 18)), txt(s, 18));
   const init = s.out.find((o) => o.msg.id === 1)?.msg.result;
-  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.35.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
+  check("59 bloco de instruções no tamanho atual (BLOCO_ATUAL) e sem image_get nele", (init?.instructions ?? "").length === BLOCO_ATUAL && !(init?.instructions ?? "").includes("image_get") && init?.serverInfo?.version === VERSAO_ATUAL && VERSAO_ATUAL === "0.36.0", `${(init?.instructions ?? "").length} ${init?.serverInfo?.version}`);
   s.p.kill();
   f.srv.close();
 }
@@ -3329,6 +3329,168 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("68 E.6: o canal segue vivo depois do tempo-limite", notifs(s2.out).some((n) => n.msg.params.content.endsWith("oi")) && s2.p.exitCode === null);
   s2.p.kill();
   f.srv.close();
+}
+
+// ─── S3. arquivos de segredo (0.36.0): chave trancada, .env com clique ─────────
+{
+  console.log("onda S3: arquivos de segredo (0.36.0)");
+  const PORTEIRO = join(ROOT, "hooks", "porteiro.mjs");
+  const { decide } = await import(PORTEIRO);
+  const SH = await import(join(ROOT, "hooks", "shared.mjs"));
+  const runHook = (home, input, env = {}) =>
+    new Promise((resolve) => {
+      const e = { ...process.env, HOME: home, USERPROFILE: home, IRON_OFFICE_CHANNEL: "1", ...env };
+      for (const [k, v] of Object.entries(e)) if (v === undefined) delete e[k];
+      const p = spawn(process.execPath, [PORTEIRO], { env: e, stdio: ["pipe", "pipe", "pipe"] });
+      let out = "";
+      p.stdout.on("data", (c) => (out += c));
+      p.on("exit", (code) => resolve({ code, out }));
+      p.stdin.end(typeof input === "string" ? input : JSON.stringify(input));
+    });
+  const negou = (r) => { try { const j = JSON.parse(r.out); return j.hookSpecificOutput?.permissionDecision === "deny" ? j.hookSpecificOutput.permissionDecisionReason : null; } catch { return null; } };
+  const calado = (r) => r.code === 0 && r.out === "";
+  const home = casa();
+  const proj = join(home, "proj");
+  mkdirSync(proj, { recursive: true });
+  const ev = (tool, input, opts = {}) => decide({ tool_name: tool, tool_input: input, cwd: opts.cwd ?? proj }, { home, ...opts });
+  const barra = (d) => (d && d.reason ? d.reason : null);
+  const KEYP = join(home, ".claude", "iron-office-api-key");
+  const ehChave = (d) => /guarda a chave do Iron Office e o Iron não abre/.test(barra(d) ?? "") && !/ev-ler-/.test(barra(d) ?? "");
+  const ehEnv = (d) => /costuma guardar senhas e o aluno ainda não liberou/.test(barra(d) ?? "") && /"id":"ev-ler-[a-f0-9]{12}"/.test(barra(d) ?? "");
+
+  // trancados
+  check("S3 Read da chave → barrado, sem opção de liberar", ehChave(ev("Read", { file_path: KEYP })) && ehChave(ev("Read", { file_path: KEYP + ".anterior" })));
+  check("S3 Bash cat da chave: ~, absoluto, $HOME, aspas, Windows → barrado",
+    ["cat ~/.claude/iron-office-api-key", `cat ${KEYP}`, "cat $HOME/.claude/iron-office-api-key", "cat \"${HOME}/.claude/iron-office-api-key\"", "cat '~/.claude/iron-office-api-key'"].every((c) => ehChave(ev("Bash", { command: c }))) &&
+    ehChave(ev("PowerShell", { command: "Get-Content C:\\Users\\a\\.claude\\iron-office-api-key" })) && ehChave(ev("Bash", { command: "type C:\\Users\\a\\.claude\\iron-office-api-key" })));
+  check("S3 Grep/Edit/Write na chave → barrado", ehChave(ev("Grep", { pattern: "iok", path: KEYP })) && ehChave(ev("Edit", { file_path: KEYP, old_string: "a", new_string: "b" })) && ehChave(ev("Write", { file_path: "~/.claude/iron-office-api-key", content: "x" })));
+  check("S3 ~/.claude.json e ~/.claude/.credentials.json → barrados (Read e cat)", /conta e os conectores do Claude/.test(barra(ev("Read", { file_path: join(home, ".claude.json") })) ?? "") && /conta e os conectores/.test(barra(ev("Bash", { command: "cat ~/.claude/.credentials.json" })) ?? "") && /conta e os conectores/.test(barra(ev("Bash", { command: "cat .credentials.json", }, { cwd: join(home, ".claude") })) ?? ""));
+  const liberaChave = join(home, ".iron", "porteiro");
+  mkdirSync(liberaChave, { recursive: true });
+  writeFileSync(join(liberaChave, "liberados.json"), JSON.stringify([{ hash: SH.envHash(SH.segNorm(KEYP, { home })), tipo: "env", at: Date.now(), until: Date.now() + 60_000 }]));
+  check("S3 chave: nem uma liberação forjada com o hash dela abre", ehChave(ev("Read", { file_path: KEYP })));
+  writeFileSync(join(liberaChave, "liberados.json"), "[]");
+
+  // .env
+  const ENVP = join(proj, ".env");
+  const dEnv = ev("Read", { file_path: ENVP });
+  const pergunta = SH.envPergunta(SH.segNorm(ENVP, { home }), { home });
+  check("S3 Read de projeto/.env sem liberação → barrado com o texto exato do ask", ehEnv(dEnv) && barra(dEnv).includes(`question exatamente "${pergunta}"`) && pergunta === "O Iron quer abrir o arquivo .env da pasta ~/proj. Esse tipo de arquivo costuma guardar senhas de outros sistemas. Foi você que pediu algo que precisa dele?" && barra(dEnv).includes(`"label":"Sim, pode abrir"`) && barra(dEnv).includes(`"label":"Não"`), barra(dEnv));
+  check("S3 .env.local e .env.production → pedem", ehEnv(ev("Read", { file_path: join(proj, ".env.local") })) && ehEnv(ev("Read", { file_path: join(proj, ".env.production") })));
+  check("S3 .env.example, .env.sample, .env.template → passam", ["example", "sample", "template"].every((x) => ev("Read", { file_path: join(proj, ".env." + x) }) === null));
+  check("S3 ambiente.env.md e env.js → passam", ev("Read", { file_path: join(proj, "ambiente.env.md") }) === null && ev("Read", { file_path: join(proj, "env.js") }) === null);
+  check("S3 Grep em caminho citando .env → pede", ehEnv(ev("Grep", { pattern: "X", path: join(proj, ".env") })));
+  check("S3 Bash: cat .env, source .env.production, --env-file=.env → pedem; process.env.X e .env.example → passam; .env.example.bak pede",
+    ehEnv(ev("Bash", { command: "cat .env | wc -l" })) && ehEnv(ev("Bash", { command: "source .env.production && npm run build" })) && ehEnv(ev("Bash", { command: "node --env-file=.env x.js" })) &&
+    ev("Bash", { command: "node -e 'console.log(process.env.X)'" }) === null && ev("Bash", { command: "cat .env.example" }) === null && ehEnv(ev("Bash", { command: "cp .env.example .env.example.bak" })));
+  check("S3 Write num .env → pede", ehEnv(ev("Write", { file_path: join(proj, ".env"), content: "A=1" })));
+
+  // liberação
+  const lib = join(home, ".iron", "porteiro", "liberados.json");
+  const hEnv = SH.envHash(SH.segNorm(ENVP, { home }));
+  writeFileSync(lib, JSON.stringify([{ hash: hEnv, tipo: "env", at: Date.now(), until: Date.now() + 30 * 60_000 }]));
+  check("S3 liberado → Read e cat do mesmo .env passam", ev("Read", { file_path: ENVP })?.pass === true && !barra(ev("Bash", { command: "wc -l .env" })));
+  check("S3 liberação de um caminho não libera outro", ehEnv(ev("Read", { file_path: join(proj, ".env.local") })) && ehEnv(ev("Read", { file_path: join(home, "outro", ".env") })));
+  check("S3 liberação vence em 30 min", ehEnv(ev("Read", { file_path: ENVP }, { now: Date.now() + 30 * 60_000 + 1000 })));
+  writeFileSync(lib, JSON.stringify([{ hash: hEnv, at: Date.now(), until: Date.now() + 60_000 }]));
+  check("S3 liberação de instalação (sem tipo env) com o mesmo hash não abre o .env", ehEnv(ev("Read", { file_path: ENVP })));
+  writeFileSync(lib, "[]");
+  check("S3 regressão: o Iron não escreve em ~/.iron/porteiro/liberados.json (Write e Bash)", /A liberação é do aluno/.test(barra(ev("Write", { file_path: lib, content: "[]" })) ?? "") && /A liberação é do aluno/.test(barra(ev("Bash", { command: `echo '[]' > ${lib}` })) ?? "") && /A liberação é do aluno/.test(barra(ev("Read", { file_path: lib })) ?? ""));
+
+  // envAskCheck
+  const opcoes = (h) => [{ id: `ev-ler-${h}`, label: "Sim, pode abrir" }, { id: `ev-nao-${h}`, label: "Não" }];
+  check("S3 ask: texto e hash do modelo → ok", SH.envAskCheck(pergunta, opcoes(hEnv), { home })?.ok === true);
+  check("S3 ask: id ev- com texto diferente do modelo → recusado", SH.envAskCheck(pergunta.replace("Foi você", "Você"), opcoes(hEnv), { home })?.ok === false && SH.envAskCheck("Posso abrir?", opcoes(hEnv), { home })?.ok === false);
+  check("S3 ask: hash de outro caminho → recusado", SH.envAskCheck(pergunta, opcoes(SH.envHash(SH.segNorm(join(proj, ".env.local"), { home }))), { home })?.ok === false);
+  check("S3 ask: rótulo trocado ou id misturado com pt- → recusado", SH.envAskCheck(pergunta, [{ id: `ev-ler-${hEnv}`, label: "Pode" }], { home })?.ok === false && SH.envAskCheck(pergunta, [...opcoes(hEnv), { id: "pt-nao-abcdef123456", label: "Não instalar" }], { home })?.ok === false);
+  check("S3 ask: sem id ev- → não é da S3 (null)", SH.envAskCheck("Qual?", [{ id: "a", label: "A" }], { home }) === null);
+  const longo = join(home, ...Array.from({ length: 30 }, (_, i) => `pasta-bem-comprida-${i}`), ".env");
+  const pl = SH.envPergunta(SH.segNorm(longo, { home }), { home });
+  check("S3 caminho longo: a pergunta cabe em 300 e só vale se o gancho registrou", pl.length <= 300 && pl.includes("…/") && SH.envAskCheck(pl, opcoes(SH.envHash(SH.segNorm(longo, { home }))), { home: casa() })?.ok === false, `${pl.length}`);
+  check("S3 Windows: caminho em minúsculas, mesmo hash com barra invertida", SH.segNorm("C:\\Users\\A\\Proj\\.env", { home: "C:\\Users\\A", platform: "win32" }) === "c:/users/a/proj/.env" && SH.segNorm("~\\Proj\\.env", { home: "C:\\Users\\A", platform: "win32" }) === "c:/users/a/proj/.env");
+
+  // gate S3 r1: o que o painel achou
+  writeFileSync(lib, JSON.stringify([{ hash: hEnv, tipo: "env", at: Date.now(), until: Date.now() + 30 * 60_000 }]));
+  check("S3 r1 B1: liberação de proj/.env não vale pra `cd outra && cat .env`, `cd ~ && cat .env` nem `git -C x show HEAD:.env`", ["cd /tmp/outra && cat .env", "cd ~ && cat .env", "pushd /tmp; cat .env", "git -C /tmp/x show HEAD:.env"].every((c) => /muda de pasta/.test(barra(ev("Bash", { command: c })) ?? "")) && !barra(ev("Bash", { command: `cd /tmp && cat ${ENVP}` })));
+  writeFileSync(lib, "[]");
+  writeFileSync(lib, JSON.stringify([{ hash: hEnv, tipo: "env", at: Date.now(), until: Date.now() + 30 * 60_000 }]));
+  check("S3 r2: Push-Location, env --chdir, git --work-tree, `cd;` e `cd&&` colados também não aproveitam a liberação", ["Push-Location /tmp/o; Get-Content .env", "env --chdir=/tmp/o cat .env", "git --work-tree=/tmp/o show :.env", "cd;cat .env", "cd&&cat .env", "cd\"/tmp/o\"&&cat .env"].every((c) => /muda de pasta/.test(barra(ev("Bash", { command: c })) ?? "")));
+  check("S3 r2: Grep com glob .env sem pasta fixa (\".env\", \"**/.env\") não aproveita a liberação de proj/.env", /muda de pasta/.test(barra(ev("Grep", { pattern: "x", path: proj, glob: ".env" })) ?? "") && /muda de pasta/.test(barra(ev("Grep", { pattern: "x", path: proj, glob: "**/.env" })) ?? ""));
+  writeFileSync(lib, "[]");
+  check("S3 r1 B2: `cd ~/.claude && cat .credentials.json` → barrado", /conta e os conectores/.test(barra(ev("Bash", { command: "cd ~/.claude && cat .credentials.json" })) ?? ""));
+  check("S3 r1 I1: Grep em ~/.claude, na home, sem path com cwd na home, e em ~/.iron/porteiro → barrado; Grep no projeto passa",
+    [{ pattern: "iok_", path: join(home, ".claude") }, { pattern: "x", path: home }, { pattern: "x", path: "/" }].every((i) => /busca passa pela pasta ~\/\.claude/.test(barra(ev("Grep", i)) ?? "")) &&
+    /busca passa/.test(barra(ev("Grep", { pattern: "x" }, { cwd: home })) ?? "") && /A liberação é do aluno/.test(barra(ev("Grep", { pattern: "x", path: join(home, ".iron", "porteiro") })) ?? "") && ev("Grep", { pattern: "x", path: proj }) === null);
+  check("S3 r1 I1: Grep com glob sub/.env* pede; glob com o nome da chave barra", ehEnv(ev("Grep", { pattern: "x", path: proj, glob: "sub/.env*" })) && ehChave(ev("Grep", { pattern: "x", path: proj, glob: "**/iron-office-api-key" })));
+  check("S3 r1: modelo que termina em .example (.env.local.example) passa; .env.sample.bak pede", ev("Read", { file_path: join(proj, ".env.local.example") }) === null && ehEnv(ev("Read", { file_path: join(proj, ".env.sample.bak") })));
+  writeFileSync(lib, JSON.stringify([{ hash: hEnv, tipo: "env-nao", at: Date.now(), until: Date.now() + 30 * 60_000 }]));
+  check("S3 r1: depois do Não (env-nao) o gancho manda seguir sem, não perguntar de novo; recusa não libera instalação", /disse Não pra abrir esse arquivo/.test(barra(ev("Read", { file_path: ENVP })) ?? "") && !/ev-ler-/.test(barra(ev("Read", { file_path: ENVP })) ?? ""));
+  check("S3 r1: recusa vencida → pergunta de novo", ehEnv(ev("Read", { file_path: ENVP }, { now: Date.now() + 31 * 60_000 })));
+  writeFileSync(lib, "[]");
+  {
+    const up = home.toUpperCase(); // a mesma pasta com outra caixa (no macOS abre o mesmo arquivo)
+    const dUp = decide({ tool_name: "Read", tool_input: { file_path: join(home, "proj", ".env").replace(home, up) }, cwd: proj }, { home });
+    const q = /question exatamente "([^"]+)"/.exec(barra(dUp) ?? "")?.[1] ?? "", hq = /ev-ler-([a-f0-9]{12})/.exec(barra(dUp) ?? "")?.[1] ?? "";
+    check("S3 r1 I2: caminho com caixa diferente da home não abrevia pra ~ e a pergunta passa no servidor", !q.includes("~") && SH.envAskCheck(q, opcoes(hq), { home })?.ok === true, q);
+  }
+
+  // G4: o tom
+  const motivo = barra(dEnv);
+  check("S3 G4: a pergunta é calma (sem ATENÇÃO, perigo, cuidado, risco nem '!')", !/aten[cç][aã]o|perigo|cuidado|risco|!/i.test(pergunta) && !/ATENÇÃO|perigo|!/.test(motivo));
+
+  // processo de verdade: gancho pelo stdin
+  const r1 = await runHook(home, { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: KEYP }, cwd: proj });
+  const r2 = await runHook(home, { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: ENVP }, cwd: proj });
+  check("S3 processo: Read da chave e do .env → deny pelo stdout", /chave do Iron Office/.test(negou(r1) ?? "") && /ev-ler-/.test(negou(r2) ?? ""), r1.out + r2.out);
+  const reg = readFileSync(join(home, ".iron", "porteiro", "registro.jsonl"), "utf8");
+  check("S3 registro: .env barrado leva hash do caminho e o texto da pergunta", reg.includes(`"hash":"${hEnv}"`) && reg.includes(`"curto":".env da pasta ~/proj"`), reg.slice(-400));
+  check("S3 processo fora do canal → calado (o modo do porteiro vale)", calado(await runHook(home, { tool_name: "Read", tool_input: { file_path: ENVP }, cwd: proj }, { IRON_OFFICE_CHANNEL: undefined })));
+  check("S3 gancho com entrada quebrada → deixa passar (como hoje)", calado(await runHook(home, "{ quebrado")));
+  check("S3 Read comum e Grep comum → calados", calado(await runHook(home, { tool_name: "Read", tool_input: { file_path: join(proj, "README.md") }, cwd: proj })) && calado(await runHook(home, { tool_name: "Grep", tool_input: { pattern: "x", path: proj }, cwd: proj })));
+
+  // servidor: o ask e o clique
+  for (const [id, grava, prefixo] of [[`ev-ler-${hEnv}`, true, "[liberado por 30 minutos; abra o arquivo de novo. O conteúdo dele nunca vai pro reply nem pro deliver]\n"], [`ev-nao-${hEnv}`, false, "[o aluno não quis; siga sem o arquivo e não pergunte de novo]\n"]]) {
+    const hs = casa();
+    let served = false;
+    const f = await fakeOffice((c) => {
+      if (c.path === "/api/chat/pull" && !served) {
+        served = true;
+        return { json: { dashboard_open: true, messages: [{ id: `m-${id}`, conversation_id: "c1", content: "clique", meta: { answer: { question_id: "q1", option_id: id } }, created_at: "2026-11-26T00:00:00Z" }] } };
+      }
+      if (c.path === "/api/chat/pull") return { json: { dashboard_open: true, messages: [] } };
+    });
+    const sv = startServer(hs, f.url, { IRON_OFFICE_CHANNEL: "1" });
+    sv.handshake();
+    await sleep(2500);
+    const n = notifs(sv.out);
+    let arq = null;
+    try { arq = JSON.parse(readFileSync(join(hs, ".iron", "porteiro", "liberados.json"), "utf8")); } catch { arq = null; }
+    // gate S3 r1: o Não também fica gravado (tipo env-nao, 30 min): o gancho responde "siga sem" em vez de mandar perguntar
+    const okArq = Array.isArray(arq) && arq.length === 1 && arq[0].hash === hEnv && arq[0].tipo === (grava ? "env" : "env-nao") && arq[0].until - arq[0].at === 30 * 60_000;
+    check(`S3 servidor: clique ${id.slice(0, 6)} → grava ${grava ? "liberação tipo env" : "recusa tipo env-nao"} (30 min) e prefixa a mensagem`, n.length === 1 && n[0].msg.params.content === `${prefixo}clique` && okArq, JSON.stringify({ c: n[0]?.msg.params.content, arq }));
+    sv.p.kill();
+    f.srv.close();
+  }
+  {
+    const hs = casa();
+    const f = await fakeOffice((c) => (c.path === "/api/chat/pull" ? { json: { dashboard_open: true, messages: [] } } : c.path === "/api/chat/messages" ? { json: { id: "x1" } } : undefined));
+    const sv = startServer(hs, f.url, { IRON_OFFICE_CHANNEL: "1" });
+    sv.handshake();
+    await sleep(800);
+    const call = (id, args) => sv.send({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "ask", arguments: args } });
+    const res = (id) => sv.out.find((o) => o.msg.id === id)?.msg.result;
+    // o servidor confere com o HOME dele: monta a pergunta com essa casa
+    const pq = SH.envPergunta(SH.segNorm(join(hs, "proj", ".env"), { home: hs }), { home: hs });
+    const hq = SH.envHash(SH.segNorm(join(hs, "proj", ".env"), { home: hs }));
+    call(2, { chat_id: "c1", question: pq, options: opcoes(hq) });
+    call(3, { chat_id: "c1", question: pq.replace("Foi você", "Você"), options: opcoes(hq) });
+    call(4, { chat_id: "c1", question: pq, options: opcoes(hEnv) });
+    await sleep(1200);
+    const enviadas = f.calls.filter((c) => c.path === "/api/chat/messages").map((c) => c.body?.text);
+    check("S3 servidor: ask no modelo sai; texto mudado e hash de outro caminho são recusados", res(2)?.isError !== true && res(3)?.isError === true && res(4)?.isError === true && /fora do modelo/.test(res(3)?.content?.[0]?.text ?? "") && enviadas.length === 1 && enviadas[0] === pq, JSON.stringify({ e: enviadas, r3: res(3)?.content?.[0]?.text }));
+    sv.p.kill();
+    f.srv.close();
+  }
 }
 
 for (const d of lixo) {

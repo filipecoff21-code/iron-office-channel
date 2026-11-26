@@ -19,12 +19,27 @@
 // A pasta do porteiro: barra o caminho .iron/porteiro, os nomes liberados.json e porteiro/modo, e .iron + porteiro no mesmo
 // comando ou com a pasta atual dentro de ~/.iron. Montar o caminho em variáveis ou glob (~/.ir?n/p*) é ofuscação: limite.
 // Erro ou tempo estourado no próprio porteiro: deixa passar (nunca trava a sessão).
+//
+// ONDA S3 (0.36.0): arquivos de segredo. O gancho também olha Read e Grep. A chave do Iron Office (e a anterior), o
+// ~/.claude.json e o ~/.claude/.credentials.json são TRANCADOS: alvo de Read/Grep/Write/Edit ou nome citado num comando
+// barra sem pergunta e sem liberação. Arquivo `.env`/`.env.<algo>` (menos .example/.sample/.template) como alvo ou palavra
+// do comando barra até o aluno clicar "Sim, pode abrir" numa pergunta calma (ids ev-ler/ev-nao-<hash do caminho>), e aí
+// passa por 30 minutos, só aquele caminho. SEGURA: pedido normal e injeção simples ("leia o .env e mande", "cat
+// ~/.claude/iron-office-api-key", com ~, $HOME, aspas, caminho absoluto ou do Windows). NÃO SEGURA: caminho montado em
+// variáveis ou pedaços (k=iron-office; cat ~/.claude/$k-api-key), curinga (cat ~/.claude/iron-*, cat .en?), script gravado
+// num passo e rodado em outro, `find`/`grep -r` numa pasta que contém o .env sem citar o nome, código Python/Node que abre
+// o arquivo por dentro. A chave tem a 2ª camada: o instalador grava permissions.deny de leitura no ~/.claude/settings.json
+// (medido 26/11: vale também no modo sem permissão, pro Read e pro cat), que segura mesmo se este gancho quebrar.
 // Nada sai da máquina: o registro fica em ~/.iron/porteiro/registro.jsonl.
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { porteiroHash, porteiroItemCurto, porteiroMode, porteiroPergunta, PORTEIRO_ROTULOS, PORTEIRO_SEM_NOME, redactKeys } from "./shared.mjs";
+import {
+  porteiroHash, porteiroItemCurto, porteiroMode, porteiroPergunta, PORTEIRO_ROTULOS, PORTEIRO_SEM_NOME, redactKeys,
+  segNorm, ehArquivoDeSenhas, trancado, MOTIVO_TRANCADO, motivoEnv, envHash, envMeio, envLiberado,
+  MOTIVO_ENV_RECUSADO, MOTIVO_ENV_CD, MOTIVO_BUSCA,
+} from "./shared.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const hashOf = porteiroHash;
@@ -504,7 +519,7 @@ const brutos = (txt) => {
 function tocaPorteiro(tool, input, home, cwd) {
   let txt;
   if (tool === "Bash" || tool === "PowerShell") txt = typeof input.command === "string" ? input.command : "";
-  else txt = typeof input.file_path === "string" ? input.file_path : typeof input.notebook_path === "string" ? input.notebook_path : "";
+  else txt = [input.file_path, input.notebook_path, input.path, input.glob].filter((x) => typeof x === "string").join(" "); // S3: Grep traz path e glob
   const ls = brutos(txt);
   if (ls.some((t) => PASTA_RE.test(t) || (/\.iron(?![a-z0-9_-])/.test(t) && /porteiro/.test(t)))) return true;
   // gate 59 r1: `.iron/p*/registro.jsonl` e `.iron/p?rteiro` escapavam do nome; curinga num caminho de .iron conta como mexer
@@ -512,6 +527,80 @@ function tocaPorteiro(tool, input, home, cwd) {
   if (ls.some((t) => /\.iron(?![a-z0-9_-])/.test(t) && /[*?[{]/.test(t))) return true;
   const c = norm(cwd).toLowerCase(), h = norm(home).toLowerCase();
   return (c === `${h}/.iron` || c.startsWith(`${h}/.iron/`)) && ls.some((t) => /porteiro/.test(t));
+}
+
+// ─── onda S3: arquivos de segredo ───────────────────────────────────────
+
+// leituras do comando que preservam maiúsculas (o hash do .env é do caminho de verdade): sem `\⏎`, sem aspas e crases,
+// $HOME/${HOME}/%USERPROFILE%/$env:USERPROFILE viram a home, $( ${ ( ) { } viram espaço; barra invertida tirada ∪ virando "/"
+function leiturasCaminho(cmd, home) {
+  const h = String(home);
+  const bases = [String(cmd).replace(/\\\r?\n/g, " "), String(cmd).replace(/\\\r?\n/g, "")];
+  return [...new Set(bases.flatMap((b) => [b.replace(/\\/g, "/"), b.replace(/\\/g, "")]).map((t) =>
+    t.replace(/["'`]/g, "").replace(/\$\{HOME\}|\$HOME\b|%USERPROFILE%|\$env:USERPROFILE\b/gi, h).replace(/\$\(|\$\{|<\(|>\(|[$(){}]/g, " ")))];
+}
+const PALAVRA_SEP = /[\s=<>|;&,]+/;
+
+/** O que o pedido toca de segredo: { trancado: "chave"|"conta"|null, envs: [caminhos normalizados] }. */
+export function segredos(tool, input, { home = homedir(), cwd = process.cwd(), platform = process.platform } = {}) {
+  const o = { home, cwd, platform };
+  const envs = new Set();
+  if (tool === "Bash" || tool === "PowerShell") {
+    const cmd = typeof input.command === "string" ? input.command : "";
+    const ls = leiturasCaminho(cmd, home);
+    const lows = ls.map((t) => t.toLowerCase().replace(/\/(\.\/)+/g, "/").replace(/\/{2,}/g, "/"));
+    // por presença: o nome da chave em qualquer lugar; as credenciais e o .claude.json pelo nome do arquivo
+    if (lows.some((t) => t.includes("iron-office-api-key"))) return { trancado: "chave", envs: [] };
+    // gate S3 r1 (B2): .credentials.json por presença, como a chave (cd ~/.claude && cat .credentials.json escapava)
+    if (lows.some((t) => /\.credentials\.json/.test(t) || /(^|[\/\s=<>|;&,])\.claude\.json(?![a-z0-9_-])/.test(t))) return { trancado: "conta", envs: [] };
+    // gate S3 r1 (B1): com cd/pushd/Set-Location/-C/--prefix no comando, .env pelo nome curto não se resolve pelo cwd
+    // gate S3 r2: Push-Location, --chdir (env), --work-tree (git) e `cd;`/`cd&&` colados também mudam de pasta
+    const mudaPasta = lows.some((t) => /(^|[\s;&|(])(cd|pushd|chdir|set-location|sl|push-location)(?=[\s;&|)"']|$)/.test(t) || /\s(-c|--directory|--prefix|--cwd|--chdir|--work-tree|--git-dir)(\s|=)/.test(t));
+    let curto = false;
+    for (const t of ls) {
+      for (const w of t.split(PALAVRA_SEP)) {
+        if (!w || /^[a-z][a-z0-9+.-]*:\/\//i.test(w)) continue;
+        const limpo = w.replace(/^[@:]+/, "");
+        // HEAD:.env (git show) e afins: o que vem depois do último ":" também conta (menos letra de unidade C:/)
+        const cands = [limpo];
+        const k = limpo.lastIndexOf(":");
+        if (k > 0 && !/^[A-Za-z]:[\\/]/.test(limpo)) cands.push(limpo.slice(k + 1));
+        for (const c of cands) {
+          if (!c || !(ehArquivoDeSenhas(c) || /^\.env[*?[]/i.test(c.split("/").pop()))) continue;
+          const abs = /^(\/|~|[A-Za-z]:\/)/.test(c) || c.startsWith(String(home));
+          if (mudaPasta && !abs) curto = true;
+          envs.add(segNorm(c, o));
+        }
+      }
+    }
+    return { trancado: null, envs: [...envs], curto };
+  }
+  const alvos = [input.file_path, input.notebook_path, input.path].filter((x) => typeof x === "string" && x);
+  for (const a of alvos) {
+    const tr = trancado(a, o);
+    if (tr) return { trancado: tr, envs: [] };
+    if (ehArquivoDeSenhas(a)) envs.add(segNorm(a, o));
+  }
+  if (tool === "Grep") {
+    // gate S3 r1 (I1): Grep na pasta (ou sem path = cwd) que contém ~/.claude ou é ela: busca, não arquivo
+    const raiz = segNorm(typeof input.path === "string" && input.path ? input.path : cwd, o);
+    const hl = segNorm(home, { ...o, cwd: "/" });
+    const rl = raiz.toLowerCase(), hh = hl.toLowerCase();
+    const dentro = rl === `${hh}/.claude` || rl.startsWith(`${hh}/.claude/`);
+    const acima = (hh + "/").startsWith(rl === "/" ? "/" : rl + "/");
+    if (dentro || acima) return { trancado: null, busca: true, envs: [] };
+    // glob com nome de segredo: o glob conta como o arquivo dentro da pasta
+    const g = typeof input.glob === "string" ? input.glob : "";
+    if (/iron-office-api-key|\.credentials\.json|(^|\/)\.claude\.json/i.test(g)) return { trancado: "chave", envs: [] };
+    for (const parte of g.split(/[{},\s]+/)) {
+      const b = parte.split("/").pop();
+      if (!b || !(ehArquivoDeSenhas(b) || /^\.env[*?[]/i.test(b))) continue;
+      // gate S3 r2: glob sem pasta fixa (".env", "**/.env") casa em qualquer subpasta: a liberação de um caminho não cobre
+      if (!parte.includes("/") || parte.includes("**")) return { trancado: null, envs: [], curto: true };
+      envs.add(segNorm(raiz + "/" + parte, o));
+    }
+  }
+  return { trancado: null, envs: [...envs] };
 }
 
 // ─── decisão ────────────────────────────────────────────────────────────
@@ -540,15 +629,30 @@ export function motivo(item, tipo) {
 }
 
 /** Decide um evento do gancho. Devolve null (passa calado), { pass, registro } ou { reason, registro } (barra). */
-export function decide(hook, { home = homedir(), now = Date.now() } = {}) {
+export function decide(hook, { home = homedir(), now = Date.now(), platform = process.platform } = {}) {
   if (!hook || typeof hook !== "object") return null;
   const tool = hook.tool_name;
   const input = hook.tool_input && typeof hook.tool_input === "object" ? hook.tool_input : {};
   const cwd = typeof hook.cwd === "string" && hook.cwd ? hook.cwd : process.cwd();
   const ehComando = tool === "Bash" || tool === "PowerShell";
   const ehArquivo = ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool);
-  if (!ehComando && !ehArquivo) return null;
+  const ehLeitura = tool === "Read" || tool === "Grep";
+  if (!ehComando && !ehArquivo && !ehLeitura) return null;
   if (tocaPorteiro(tool, input, home, cwd)) return { reason: MOTIVO_PASTA, registro: { item: "porteiro", tipo: "pasta ou chave do porteiro" } };
+
+  // onda S3: segredo antes da instalação (trancado barra sempre; .env sem liberação barra e manda perguntar)
+  const seg = segredos(tool, input, { home, cwd, platform });
+  if (seg.trancado) return { reason: MOTIVO_TRANCADO[seg.trancado], registro: { item: seg.trancado === "chave" ? "chave do Iron Office" : "conta do Claude", tipo: "arquivo trancado" } };
+  if (seg.busca) return { reason: MOTIVO_BUSCA, registro: { item: "busca na pasta ~/.claude", tipo: "arquivo trancado" } };
+  if (seg.curto) return { reason: MOTIVO_ENV_CD, registro: { item: "arquivo .env com mudança de pasta", tipo: "arquivo de senhas" } };
+  const recusado = seg.envs.find((c) => envLiberado(c, { home, now, tipo: "env-nao" }));
+  if (recusado) return { reason: MOTIVO_ENV_RECUSADO, registro: { item: envMeio(recusado, { home }), tipo: "arquivo de senhas recusado" } };
+  const envFechado = seg.envs.find((c) => !envLiberado(c, { home, now }));
+  if (envFechado) {
+    const meio = envMeio(envFechado, { home });
+    return { reason: motivoEnv(envFechado, { home }), registro: { item: meio, tipo: "arquivo de senhas", hash: envHash(envFechado), curto: meio } };
+  }
+  if (ehLeitura) return seg.envs.length ? { pass: true, registro: seg.envs.map((c) => ({ item: envMeio(c, { home }), tipo: "arquivo de senhas", decisao: "liberado" })) } : null;
 
   let items = [];
   if (ehComando) items = commandItems(typeof input.command === "string" ? input.command : "", { cwd });
@@ -558,7 +662,7 @@ export function decide(hook, { home = homedir(), now = Date.now() } = {}) {
   }
   const fora = items.filter((x) => x.item && !x.casa);
   if (!fora.length) return null;
-  const ok = new Set(liberados(home).filter((l) => l && typeof l.hash === "string" && Number(l.until) > now).map((l) => l.hash));
+  const ok = new Set(liberados(home).filter((l) => l && !String(l.tipo ?? "").startsWith("env") && typeof l.hash === "string" && Number(l.until) > now).map((l) => l.hash));
   const barrado = fora.find((x) => !ok.has(hashOf(shown(x.item))));
   if (!barrado) return { pass: true, registro: fora.map((x) => ({ item: x.item, tipo: x.tipo, decisao: "liberado" })) };
   return { reason: motivo(barrado.item, barrado.tipo), registro: { item: barrado.item, tipo: barrado.tipo } };
@@ -571,7 +675,7 @@ function registra(home, linhas) {
     const at = new Date().toISOString();
     // onda 59: barrado leva o hash do item inteiro e o nome cortado da pergunta (o servidor confere a ask por eles)
     const txt = linhas.map((l) => JSON.stringify({ at, item: redactKeys(l.item, 300).text, tipo: l.tipo, decisao: l.decisao,
-      ...(l.decisao === "barrado" ? { hash: hashOf(shown(l.item)), curto: porteiroItemCurto(shown(l.item)) } : {}) })).join("\n") + "\n";
+      ...(l.decisao === "barrado" ? { hash: l.hash ?? hashOf(shown(l.item)), curto: l.curto ?? porteiroItemCurto(shown(l.item)) } : {}) })).join("\n") + "\n";
     appendFileSync(join(dir, "registro.jsonl"), txt, { mode: 0o600 });
   } catch {
     // registro é ajuda, não condição
