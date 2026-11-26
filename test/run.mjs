@@ -1764,7 +1764,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   check("43 ask com link 'dropkiller' → o site recebe meta.question.link = 'dropkiller' (com as opções)", enviadas.length === antes + 1 && q?.link === "dropkiller" && q?.options?.length === 2 && res(s, 10)?.isError !== true, JSON.stringify(q));
   call(s, 11, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: "loja" });
   await sleep(400);
-  check("43 ask com link desconhecido ('loja') → isError, nada enviado (57: a mensagem cita as duas chaves)", res(s, 11)?.isError === true && txt(s, 11).includes("'dropkiller', 'shopify', 'droplatam' e 'releasit'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
+  check("43 ask com link desconhecido ('loja') → isError, nada enviado (72: a mensagem cita as 4 chaves)", res(s, 11)?.isError === true && txt(s, 11).includes("'dropkiller', 'shopify', 'droplatam' e 'releasit'") && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 11));
   call(s, 14, "ask", { chat_id: "c1", question: "Quer ligar?", options: ["Sim"], link: ["dropkiller"] });
   await sleep(400);
   check("43 ask com link em lista (['dropkiller']) → recusado como o site recusa, nada enviado", res(s, 14)?.isError === true && f.calls.filter((c) => c.path === "/api/chat/messages").length === antes + 1, txt(s, 14));
@@ -1775,7 +1775,7 @@ async function runHook(home, url, input, channel = "1", hookPath = HOOK) {
   call(s, 15, "ask", { chat_id: "c1", question: "Instalo o Releasit pelo link da comunidade?", options: ["Sim, abrir o link", "Já tenho um app de pagamento na entrega", "Depois"], link: "releasit" });
   await sleep(500);
   const q72 = f.calls.filter((c) => c.path === "/api/chat/messages").at(-1)?.body?.meta?.question;
-  check("72 ask com link 'releasit' → o site recebe meta.question.link = 'releasit' (3 opções) e nenhuma URL do Releasit sai do plugin", res(s, 15)?.isError !== true && q72?.link === "releasit" && q72?.options?.length === 3 && !/releas\.it/i.test(JSON.stringify(f.calls)) && !/releas\.it/i.test(readFileSync(join(ROOT, "src", "server.mjs"), "utf8")), JSON.stringify(q72));
+  check("72 ask com link 'releasit' → o site recebe meta.question.link = 'releasit' (3 opções) e nenhuma URL do Releasit sai do plugin", res(s, 15)?.isError !== true && q72?.link === "releasit" && q72?.options?.length === 3 && !/releas\.it/i.test(JSON.stringify(f.calls)) && !/releas\.it/i.test(readFileSync(join(ROOT, "src", "server.mjs"), "utf8")) && !/releas\.it/i.test(readFileSync(join(ROOT, "dist", "server.mjs"), "utf8")), JSON.stringify(q72));
   call(s, 13, "ask", { chat_id: "c1", question: "Sem link?", options: ["A", "B"] });
   await sleep(400);
   const q2 = f.calls.filter((c) => c.path === "/api/chat/messages").pop()?.body?.meta?.question;
