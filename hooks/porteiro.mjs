@@ -555,7 +555,7 @@ export function segredos(tool, input, { home = homedir(), cwd = process.cwd(), p
     if (lows.some((t) => /\.credentials\.json/.test(t) || /(^|[\/\s=<>|;&,])\.claude\.json(?![a-z0-9_-])/.test(t))) return { trancado: "conta", envs: [] };
     // gate S3 r1 (B1): com cd/pushd/Set-Location/-C/--prefix no comando, .env pelo nome curto não se resolve pelo cwd
     // gate S3 r2: Push-Location, --chdir (env), --work-tree (git) e `cd;`/`cd&&` colados também mudam de pasta
-    const mudaPasta = lows.some((t) => /(^|[\s;&|(])(cd|pushd|chdir|set-location|sl|push-location)(?=[\s;&|)"']|$)/.test(t) || /\s(-c|--directory|--prefix|--cwd|--chdir|--work-tree|--git-dir)(\s|=)/.test(t));
+    const mudaPasta = [...lows, cmd.toLowerCase()].some((t) => /(^|[\s;&|(])(cd|pushd|chdir|set-location|sl|push-location)(?=[\s;&|)"']|$)/.test(t) || /\s(-c|--directory|--prefix|--cwd|--chdir|--work-tree|--git-dir)(\s|=)/.test(t));
     let curto = false;
     for (const t of ls) {
       for (const w of t.split(PALAVRA_SEP)) {
